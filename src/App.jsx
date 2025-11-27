@@ -115,17 +115,14 @@ export default function CleanPlateCasino() {
     }
   };
 
-  const [recipes, setRecipes] = useState(() => loadRecipes());
+  const [recipes, setRecipes] = useState(() => DEFAULT_RECIPES); // Start with defaults, Firebase will load shared recipes
   const [view, setView] = useState('casino'); // 'casino', 'favorites', 'browse', or 'dailyMenu'
   const userData = loadUserData();
   const [savedIds, setSavedIds] = useState(userData.favorites); // User Favorites
   const [dailyMenuIds, setDailyMenuIds] = useState(userData.dailyMenu); // Today's Menu
   const [templates, setTemplates] = useState([]); // Saved Menu Templates
   
-  const [currentRecipe, setCurrentRecipe] = useState(() => {
-    const loaded = loadRecipes();
-    return loaded[0] || DEFAULT_RECIPES[0];
-  });
+  const [currentRecipe, setCurrentRecipe] = useState(DEFAULT_RECIPES[0]);
   const [isSpinning, setIsSpinning] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [userId, setUserId] = useState(null);
@@ -151,14 +148,8 @@ export default function CleanPlateCasino() {
     img: ''
   });
 
-  // Save recipes to localStorage whenever they change
-  useEffect(() => {
-    try {
-      localStorage.setItem('cleaneats_recipes', JSON.stringify(recipes));
-    } catch (e) {
-      console.error("Error saving recipes:", e);
-    }
-  }, [recipes]);
+  // Recipes are now shared via Firebase, no need to save to localStorage
+  // (localStorage was for user-specific recipes, but now recipes are public/shared)
 
   // Save favorites to localStorage
   useEffect(() => {
@@ -240,7 +231,35 @@ export default function CleanPlateCasino() {
     }
   }, []);
 
-  // Load and sync user data with Firebase
+  // Load shared recipes from Firebase (public, everyone can see/edit)
+  useEffect(() => {
+    if (!isAuthReady || !db) return;
+
+    const sharedRecipesRef = collection(db, `/artifacts/${appId}/sharedRecipes`);
+    
+    // Set up real-time listener for shared recipes
+    const unsubscribe = onSnapshot(sharedRecipesRef, (snapshot) => {
+      const sharedRecipes = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      // Merge shared recipes with default recipes (avoid duplicates by name)
+      const defaultNames = new Set(DEFAULT_RECIPES.map(r => r.name));
+      const uniqueShared = sharedRecipes.filter(r => !defaultNames.has(r.name));
+      const allRecipes = [...DEFAULT_RECIPES, ...uniqueShared];
+      
+      setRecipes(allRecipes);
+    }, (error) => {
+      console.error("Error listening to shared recipes:", error);
+      // Fallback to default recipes if Firebase fails
+      setRecipes(DEFAULT_RECIPES);
+    });
+
+    return () => unsubscribe();
+  }, [isAuthReady, appId]);
+
+  // Load and sync user data with Firebase (favorites, daily menu - private)
   useEffect(() => {
     if (!isAuthReady || !userId || !db) return;
 
@@ -254,7 +273,6 @@ export default function CleanPlateCasino() {
           const data = userDoc.data();
           if (data.favorites) setSavedIds(data.favorites);
           if (data.dailyMenu) setDailyMenuIds(data.dailyMenu);
-          if (data.recipes) setRecipes(data.recipes);
         }
       } catch (e) {
         console.error("Error loading user data from Firebase:", e);
@@ -269,7 +287,6 @@ export default function CleanPlateCasino() {
         const data = snapshot.data();
         if (data.favorites) setSavedIds(data.favorites);
         if (data.dailyMenu) setDailyMenuIds(data.dailyMenu);
-        if (data.recipes) setRecipes(data.recipes);
       }
     }, (error) => {
       console.error("Error listening to user data:", error);
@@ -278,7 +295,7 @@ export default function CleanPlateCasino() {
     return () => unsubscribe();
   }, [isAuthReady, userId, appId]);
 
-  // Save user data to Firebase whenever it changes
+  // Save user data to Firebase whenever it changes (favorites, daily menu only - not recipes)
   useEffect(() => {
     if (!isAuthReady || !userId || !db) return;
 
@@ -289,7 +306,6 @@ export default function CleanPlateCasino() {
         await setDoc(userDocRef, {
           favorites: savedIds,
           dailyMenu: dailyMenuIds,
-          recipes: recipes,
           lastUpdated: Date.now()
         }, { merge: true });
       } catch (e) {
@@ -300,7 +316,7 @@ export default function CleanPlateCasino() {
     // Debounce Firebase saves to avoid too many writes
     const timeoutId = setTimeout(saveToFirebase, 1000);
     return () => clearTimeout(timeoutId);
-  }, [isAuthReady, userId, savedIds, dailyMenuIds, recipes, appId]);
+  }, [isAuthReady, userId, savedIds, dailyMenuIds, appId]);
 
   // Real-time Template Listener
   useEffect(() => {
@@ -345,25 +361,42 @@ export default function CleanPlateCasino() {
     }, 600);
   };
 
-  // Add new dish
-  const handleAddDish = () => {
+  // Add new dish to shared recipes (everyone can see it)
+  const handleAddDish = async () => {
     if (!newDish.name.trim()) {
       alert('Please enter a dish name');
       return;
     }
 
-    const maxId = recipes.length > 0 ? Math.max(...recipes.map(r => r.id)) : 0;
     const dish = {
-      id: maxId + 1,
       name: newDish.name.trim(),
       cuisine: newDish.cuisine,
       protein: newDish.protein,
       cals: parseInt(newDish.cals) || 0,
       time: newDish.time.trim() || '30m',
-      img: newDish.img.trim() || `https://placehold.co/800x600/6EE7B7/ffffff?text=${newDish.name.trim().split(' ').map(n=>n[0]).join('')}`
+      img: newDish.img.trim() || `https://placehold.co/800x600/6EE7B7/ffffff?text=${newDish.name.trim().split(' ').map(n=>n[0]).join('')}`,
+      createdAt: Date.now(),
+      createdBy: userId || 'anonymous'
     };
 
-    setRecipes([...recipes, dish]);
+    // Save to Firebase shared recipes collection
+    if (isAuthReady && db) {
+      try {
+        const sharedRecipesRef = collection(db, `/artifacts/${appId}/sharedRecipes`);
+        await addDoc(sharedRecipesRef, dish);
+        // Recipe will be added automatically via the real-time listener
+      } catch (e) {
+        console.error("Error saving recipe to Firebase:", e);
+        alert('Failed to save recipe. Please try again.');
+        return;
+      }
+    } else {
+      // Fallback to local storage if Firebase not available
+      const maxId = recipes.length > 0 ? Math.max(...recipes.map(r => r.id || 0)) : 0;
+      const dishWithId = { ...dish, id: maxId + 1 };
+      setRecipes([...recipes, dishWithId]);
+    }
+
     setNewDish({
       name: '',
       cuisine: 'Mediterranean',
@@ -375,40 +408,65 @@ export default function CleanPlateCasino() {
     setShowAddForm(false);
   };
 
-  // Delete dish
-  const handleDeleteDish = (id) => {
-    if (window.confirm('Are you sure you want to delete this dish?')) {
-      setRecipes(recipes.filter(r => r.id !== id));
+  // Delete dish from shared recipes
+  const handleDeleteDish = async (recipe) => {
+    if (window.confirm('Are you sure you want to delete this dish? Everyone will lose access to it.')) {
+      // If it's a shared recipe (has Firebase doc ID), delete from Firebase
+      if (recipe.id && typeof recipe.id === 'string' && recipe.id.length > 20 && isAuthReady && db) {
+        try {
+          const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, recipe.id);
+          await deleteDoc(recipeDocRef);
+          // Recipe will be removed automatically via the real-time listener
+        } catch (e) {
+          console.error("Error deleting recipe from Firebase:", e);
+          alert('Failed to delete recipe. Please try again.');
+          return;
+        }
+      } else {
+        // Default recipe or local-only recipe - just remove from local state
+        setRecipes(recipes.filter(r => r !== recipe));
+      }
+      
       // Also remove from favorites and daily menu if present
-      setSavedIds(savedIds.filter(sid => sid !== id));
-      setDailyMenuIds(dailyMenuIds.filter(did => did !== id));
+      const recipeId = recipe.id || recipe.name;
+      setSavedIds(savedIds.filter(sid => sid !== recipeId));
+      setDailyMenuIds(dailyMenuIds.filter(did => did !== recipeId));
+      
       // Update current recipe if it was deleted
-      if (currentRecipe.id === id && recipes.length > 1) {
-        setCurrentRecipe(recipes.find(r => r.id !== id) || recipes[0]);
+      if (currentRecipe === recipe && recipes.length > 1) {
+        setCurrentRecipe(recipes.find(r => r !== recipe) || recipes[0]);
       }
     }
   };
 
   // Toggle recipe in Favorites list
-  const toggleSave = (id) => {
+  const toggleSave = (recipe) => {
+    const recipeId = recipe.id || recipe.name;
     setSavedIds(prev => 
-      prev.includes(id) 
-        ? prev.filter(sid => sid !== id) 
-        : [...prev, id]
+      prev.includes(recipeId) 
+        ? prev.filter(sid => sid !== recipeId) 
+        : [...prev, recipeId]
     );
   };
   
   // Toggle recipe in Today's Menu
-  const toggleDailyMenu = (id) => {
+  const toggleDailyMenu = (recipe) => {
+    const recipeId = recipe.id || recipe.name;
     setDailyMenuIds(prev => 
-      prev.includes(id) 
-        ? prev.filter(sid => sid !== id) 
-        : [...prev, id]
+      prev.includes(recipeId) 
+        ? prev.filter(did => did !== recipeId) 
+        : [...prev, recipeId]
     );
   };
 
-  const getSavedRecipes = () => recipes.filter(r => savedIds.includes(r.id));
-  const getDailyMenuRecipes = () => recipes.filter(r => dailyMenuIds.includes(r.id));
+  const getSavedRecipes = () => recipes.filter(r => {
+    const recipeId = r.id || r.name;
+    return savedIds.includes(recipeId);
+  });
+  const getDailyMenuRecipes = () => recipes.filter(r => {
+    const recipeId = r.id || r.name;
+    return dailyMenuIds.includes(recipeId);
+  });
 
   const saveTemplate = async (name) => {
     if (!isAuthReady || !userId || dailyMenuIds.length === 0 || !db) {
@@ -449,7 +507,7 @@ export default function CleanPlateCasino() {
 
   // --- RENDER HELPERS ---
 
-  const RecipeCardSmall = ({ recipe, isSaved, isDaily, onToggleSave, onToggleDaily, onDelete }) => (
+  const RecipeCardSmall = ({ recipe, isSaved, isDaily, onToggleSave, onToggleDaily, onDelete, recipeId }) => (
     <div className="bg-white rounded-xl p-3 shadow-sm flex items-center gap-4 transition-all hover:shadow-md">
       <img 
         src={recipe.img} 
@@ -493,9 +551,9 @@ export default function CleanPlateCasino() {
         </button>
         {onDelete && (
           <button 
-            onClick={() => onDelete(recipe.id)}
+            onClick={() => onDelete(recipe)}
             className="p-2 rounded-full transition-colors bg-red-100 text-red-600 hover:bg-red-200"
-            title="Delete Dish"
+            title="Delete Dish (Everyone will lose access)"
           >
             <Trash2 size={18} />
           </button>
@@ -695,17 +753,20 @@ export default function CleanPlateCasino() {
             Showing {filteredRecipes.length} recipes
           </div>
           
-          {filteredRecipes.map(recipe => (
-            <RecipeCardSmall
-              key={recipe.id}
-              recipe={recipe}
-              isSaved={savedIds.includes(recipe.id)}
-              isDaily={dailyMenuIds.includes(recipe.id)}
-              onToggleSave={toggleSave}
-              onToggleDaily={toggleDailyMenu}
-              onDelete={handleDeleteDish}
-            />
-          ))}
+          {filteredRecipes.map((recipe, index) => {
+            const recipeId = recipe.id || recipe.name || index;
+            return (
+              <RecipeCardSmall
+                key={recipeId}
+                recipe={recipe}
+                isSaved={savedIds.includes(recipeId)}
+                isDaily={dailyMenuIds.includes(recipeId)}
+                onToggleSave={() => toggleSave(recipe)}
+                onToggleDaily={() => toggleDailyMenu(recipe)}
+                onDelete={handleDeleteDish}
+              />
+            );
+          })}
 
           {filteredRecipes.length === 0 && (
              <div className="text-center py-10 text-stone-400">
@@ -918,9 +979,9 @@ export default function CleanPlateCasino() {
                       </div>
                       <div className="flex flex-col gap-2">
                          <button 
-                            onClick={() => toggleDailyMenu(recipe.id)}
+                            onClick={() => toggleDailyMenu(recipe)}
                             className={`p-2 rounded-full transition-colors ${
-                              dailyMenuIds.includes(recipe.id)
+                              dailyMenuIds.includes(recipe.id || recipe.name)
                                 ? 'bg-blue-100 text-blue-600'
                                 : 'bg-stone-100 text-stone-400 hover:bg-stone-200'
                             }`}
@@ -929,7 +990,7 @@ export default function CleanPlateCasino() {
                             <Calendar size={18} />
                           </button>
                           <button 
-                            onClick={() => toggleSave(recipe.id)}
+                            onClick={() => toggleSave(recipe)}
                             className="p-2 text-stone-300 hover:text-red-400 transition-colors"
                             title="Remove from Favorites"
                           >
@@ -1043,28 +1104,28 @@ export default function CleanPlateCasino() {
                 <div className="flex flex-col gap-2">
                    {/* Add to Daily Menu Button */}
                   <button 
-                    onClick={() => toggleDailyMenu(currentRecipe.id)}
+                    onClick={() => toggleDailyMenu(currentRecipe)}
                     className={`flex items-center gap-2 px-3 py-1 rounded-full font-bold transition-all transform active:scale-95 text-sm ${
-                      dailyMenuIds.includes(currentRecipe.id)
+                      dailyMenuIds.includes(currentRecipe.id || currentRecipe.name)
                         ? 'bg-blue-600 text-white shadow-md'
                         : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
                     }`}
                   >
                     <Calendar size={16} />
-                    {dailyMenuIds.includes(currentRecipe.id) ? 'Planned' : 'Add to Menu'}
+                    {dailyMenuIds.includes(currentRecipe.id || currentRecipe.name) ? 'Planned' : 'Add to Menu'}
                   </button>
                   
                   {/* Keep/Save to Favorites Button */}
                   <button 
-                    onClick={() => toggleSave(currentRecipe.id)}
+                    onClick={() => toggleSave(currentRecipe)}
                     className={`flex items-center gap-2 px-3 py-1 rounded-full font-bold transition-all transform active:scale-95 text-sm ${
-                      savedIds.includes(currentRecipe.id)
+                      savedIds.includes(currentRecipe.id || currentRecipe.name)
                         ? 'bg-emerald-100 text-emerald-700'
                         : 'bg-gray-900 text-white hover:bg-gray-800'
                     }`}
                   >
-                    <Heart size={16} className={savedIds.includes(currentRecipe.id) ? 'fill-emerald-700' : ''} />
-                    {savedIds.includes(currentRecipe.id) ? 'Favorited' : 'Keep'}
+                    <Heart size={16} className={savedIds.includes(currentRecipe.id || currentRecipe.name) ? 'fill-emerald-700' : ''} />
+                    {savedIds.includes(currentRecipe.id || currentRecipe.name) ? 'Favorited' : 'Keep'}
                   </button>
                 </div>
                 

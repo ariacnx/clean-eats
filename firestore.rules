@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user owns the data
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // SHARED RECIPES - Anyone can read, authenticated users can write
+    // Path: /artifacts/{appId}/sharedRecipes/{recipeId}
+    match /artifacts/{appId}/sharedRecipes/{recipeId} {
+      allow read: if true;  // Anyone can read
+      allow write: if isAuthenticated();  // Only authenticated users can add/edit/delete
+    }
+    
+    // User data - users can only read/write their own data
+    // Path: /artifacts/{appId}/users/{userId}/data/userData
+    match /artifacts/{appId}/users/{userId}/data/{document=**} {
+      allow read, write: if isOwner(userId);
+    }
+    
+    // Meal templates - users can only read/write their own templates
+    // Path: /artifacts/{appId}/users/{userId}/mealTemplates/{templateId}
+    match /artifacts/{appId}/users/{userId}/mealTemplates/{templateId} {
+      allow read, write: if isOwner(userId);
+    }
+    
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
