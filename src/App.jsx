@@ -103,24 +103,21 @@ export default function CleanPlateCasino() {
   // Load user data from localStorage
   const loadUserData = () => {
     try {
-      const savedFavorites = localStorage.getItem('cleaneats_favorites');
-      const savedDailyMenu = localStorage.getItem('cleaneats_dailyMenu');
+      const savedMenu = localStorage.getItem('cleaneats_currentMenu');
       return {
-        favorites: savedFavorites ? JSON.parse(savedFavorites) : [],
-        dailyMenu: savedDailyMenu ? JSON.parse(savedDailyMenu) : []
+        currentMenu: savedMenu ? JSON.parse(savedMenu) : []
       };
     } catch (e) {
       console.error("Error loading user data:", e);
-      return { favorites: [], dailyMenu: [] };
+      return { currentMenu: [] };
     }
   };
 
   const [recipes, setRecipes] = useState(() => DEFAULT_RECIPES); // Start with defaults, Firebase will load shared recipes
-  const [view, setView] = useState('casino'); // 'casino', 'favorites', 'browse', or 'dailyMenu'
+  const [view, setView] = useState('spin'); // 'spin', 'browse', or 'menus'
   const userData = loadUserData();
-  const [savedIds, setSavedIds] = useState(userData.favorites); // User Favorites
-  const [dailyMenuIds, setDailyMenuIds] = useState(userData.dailyMenu); // Today's Menu
-  const [templates, setTemplates] = useState([]); // Saved Menu Templates
+  const [currentMenuIds, setCurrentMenuIds] = useState(userData.currentMenu); // Current working menu
+  const [savedMenus, setSavedMenus] = useState([]); // Saved Menus (formerly templates)
   
   const [currentRecipe, setCurrentRecipe] = useState(DEFAULT_RECIPES[0]);
   const [isSpinning, setIsSpinning] = useState(false);
@@ -131,11 +128,8 @@ export default function CleanPlateCasino() {
   const [lockCuisine, setLockCuisine] = useState("All");
   const [lockProtein, setLockProtein] = useState("All");
 
-  // State for the template name (Crucial for obeying Rules of Hooks)
-  const [templateName, setTemplateName] = useState(''); 
-
-  // Grouping Mode for Favorites
-  const [groupBy, setGroupBy] = useState('cuisine'); // 'cuisine' or 'protein'
+  // State for the menu name (Crucial for obeying Rules of Hooks)
+  const [templateName, setTemplateName] = useState(''); // Reusing this state for menu name
 
   // Add/Delete dish states
   const [showAddForm, setShowAddForm] = useState(false);
@@ -147,30 +141,26 @@ export default function CleanPlateCasino() {
     time: '',
     img: ''
   });
+  const [imagePreview, setImagePreview] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
+
+  // Menu selector modal state
+  const [showMenuSelector, setShowMenuSelector] = useState(false);
+  const [selectedRecipeForMenu, setSelectedRecipeForMenu] = useState(null);
 
   // Recipes are now shared via Firebase, no need to save to localStorage
   // (localStorage was for user-specific recipes, but now recipes are public/shared)
 
-  // Save favorites to localStorage
+  // Save current menu to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('cleaneats_favorites', JSON.stringify(savedIds));
+      localStorage.setItem('cleaneats_currentMenu', JSON.stringify(currentMenuIds));
     } catch (e) {
-      console.error("Error saving favorites:", e);
+      console.error("Error saving current menu:", e);
     }
-  }, [savedIds]);
+  }, [currentMenuIds]);
 
-  // Save daily menu to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('cleaneats_dailyMenu', JSON.stringify(dailyMenuIds));
-    } catch (e) {
-      console.error("Error saving daily menu:", e);
-    }
-  }, [dailyMenuIds]);
-
-  const savedCount = savedIds.length;
-  const dailyMenuCount = dailyMenuIds.length;
+  const currentMenuCount = currentMenuIds.length;
   const appId = typeof window !== 'undefined' && typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
 
   // --- FIREBASE SETUP & DATA LOADING ---
@@ -271,8 +261,7 @@ export default function CleanPlateCasino() {
         const userDoc = await getDoc(userDocRef);
         if (userDoc.exists()) {
           const data = userDoc.data();
-          if (data.favorites) setSavedIds(data.favorites);
-          if (data.dailyMenu) setDailyMenuIds(data.dailyMenu);
+          if (data.currentMenu) setCurrentMenuIds(data.currentMenu);
         }
       } catch (e) {
         console.error("Error loading user data from Firebase:", e);
@@ -285,8 +274,7 @@ export default function CleanPlateCasino() {
     const unsubscribe = onSnapshot(userDocRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
-        if (data.favorites) setSavedIds(data.favorites);
-        if (data.dailyMenu) setDailyMenuIds(data.dailyMenu);
+        if (data.currentMenu) setCurrentMenuIds(data.currentMenu);
       }
     }, (error) => {
       console.error("Error listening to user data:", error);
@@ -304,8 +292,7 @@ export default function CleanPlateCasino() {
     const saveToFirebase = async () => {
       try {
         await setDoc(userDocRef, {
-          favorites: savedIds,
-          dailyMenu: dailyMenuIds,
+          currentMenu: currentMenuIds,
           lastUpdated: Date.now()
         }, { merge: true });
       } catch (e) {
@@ -316,28 +303,63 @@ export default function CleanPlateCasino() {
     // Debounce Firebase saves to avoid too many writes
     const timeoutId = setTimeout(saveToFirebase, 1000);
     return () => clearTimeout(timeoutId);
-  }, [isAuthReady, userId, savedIds, dailyMenuIds, appId]);
+  }, [isAuthReady, userId, currentMenuIds, appId]);
 
-  // Real-time Template Listener
+  // Real-time Saved Menus Listener
   useEffect(() => {
     if (!isAuthReady || !userId || !db) return;
 
-    const templateCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/mealTemplates`);
+    const menusCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/savedMenus`);
     
-    const unsubscribe = onSnapshot(templateCollectionRef, (snapshot) => {
-      const loadedTemplates = snapshot.docs.map(doc => ({
+    const unsubscribe = onSnapshot(menusCollectionRef, (snapshot) => {
+      const loadedMenus = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      setTemplates(loadedTemplates);
+      setSavedMenus(loadedMenus);
     }, (error) => {
-      console.error("Error listening to templates:", error);
+      console.error("Error listening to saved menus:", error);
     });
 
     return () => unsubscribe();
   }, [isAuthReady, userId, appId]);
 
   // --- CORE LOGIC FUNCTIONS ---
+
+  // Handle image file selection
+  const handleImageSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        alert('Please select an image file.');
+        return;
+      }
+      
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Image size must be less than 5MB.');
+        return;
+      }
+
+      setImageFile(file);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+        setNewDish({...newDish, img: reader.result}); // Set as base64 data URL
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Remove selected image
+  const handleRemoveImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    setNewDish({...newDish, img: ''});
+  };
 
   const handleSpin = () => {
     if (isSpinning) return;
@@ -405,6 +427,8 @@ export default function CleanPlateCasino() {
       time: '',
       img: ''
     });
+    setImageFile(null);
+    setImagePreview(null);
     setShowAddForm(false);
   };
 
@@ -427,10 +451,9 @@ export default function CleanPlateCasino() {
         setRecipes(recipes.filter(r => r !== recipe));
       }
       
-      // Also remove from favorites and daily menu if present
+      // Also remove from current menu if present
       const recipeId = recipe.id || recipe.name;
-      setSavedIds(savedIds.filter(sid => sid !== recipeId));
-      setDailyMenuIds(dailyMenuIds.filter(did => did !== recipeId));
+      setCurrentMenuIds(currentMenuIds.filter(did => did !== recipeId));
       
       // Update current recipe if it was deleted
       if (currentRecipe === recipe && recipes.length > 1) {
@@ -439,249 +462,246 @@ export default function CleanPlateCasino() {
     }
   };
 
-  // Toggle recipe in Favorites list
-  const toggleSave = (recipe) => {
-    const recipeId = recipe.id || recipe.name;
-    setSavedIds(prev => 
-      prev.includes(recipeId) 
-        ? prev.filter(sid => sid !== recipeId) 
-        : [...prev, recipeId]
-    );
-  };
-  
-  // Toggle recipe in Today's Menu
-  const toggleDailyMenu = (recipe) => {
-    const recipeId = recipe.id || recipe.name;
-    setDailyMenuIds(prev => 
-      prev.includes(recipeId) 
-        ? prev.filter(did => did !== recipeId) 
-        : [...prev, recipeId]
-    );
+  // Open menu selector to add recipe to a saved menu
+  const openMenuSelector = (recipe) => {
+    setSelectedRecipeForMenu(recipe);
+    setShowMenuSelector(true);
   };
 
-  const getSavedRecipes = () => recipes.filter(r => {
+  // Add recipe to a specific saved menu
+  const addToMenu = async (menuId) => {
+    if (!selectedRecipeForMenu || !isAuthReady || !userId || !db) return;
+    
+    try {
+      const menuDocRef = doc(db, `/artifacts/${appId}/users/${userId}/savedMenus`, menuId);
+      const menuDoc = await getDoc(menuDocRef);
+      
+      if (menuDoc.exists()) {
+        const menuData = menuDoc.data();
+        const recipeId = selectedRecipeForMenu.id || selectedRecipeForMenu.name;
+        
+        // Add recipe if not already in menu
+        if (!menuData.recipeIds.includes(recipeId)) {
+          await updateDoc(menuDocRef, {
+            recipeIds: [...menuData.recipeIds, recipeId]
+          });
+        }
+      }
+      
+      setShowMenuSelector(false);
+      setSelectedRecipeForMenu(null);
+    } catch (e) {
+      console.error("Error adding recipe to menu:", e);
+      alert('Failed to add dish to menu. Please try again.');
+    }
+  };
+
+  // Create new menu and add recipe to it
+  const createMenuAndAdd = async () => {
+    if (!selectedRecipeForMenu || !isAuthReady || !userId || !db) return;
+    
+    const menuName = templateName.trim() || `Menu ${savedMenus.length + 1}`;
+    const recipeId = selectedRecipeForMenu.id || selectedRecipeForMenu.name;
+    
+    try {
+      const menusCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/savedMenus`);
+      await addDoc(menusCollectionRef, {
+        name: menuName,
+        recipeIds: [recipeId],
+        createdAt: Date.now()
+      });
+      
+      setShowMenuSelector(false);
+      setSelectedRecipeForMenu(null);
+      setTemplateName('');
+    } catch (e) {
+      console.error("Error creating menu:", e);
+      alert('Failed to create menu. Please try again.');
+    }
+  };
+
+  const getCurrentMenuRecipes = () => recipes.filter(r => {
     const recipeId = r.id || r.name;
-    return savedIds.includes(recipeId);
-  });
-  const getDailyMenuRecipes = () => recipes.filter(r => {
-    const recipeId = r.id || r.name;
-    return dailyMenuIds.includes(recipeId);
+    return currentMenuIds.includes(recipeId);
   });
 
-  const saveTemplate = async (name) => {
-    if (!isAuthReady || !userId || dailyMenuIds.length === 0 || !db) {
+  const saveMenu = async (name) => {
+    if (!isAuthReady || !userId || currentMenuIds.length === 0 || !db) {
       console.error("Cannot save: Auth not ready or menu is empty.");
       return;
     }
 
     try {
-      const templateCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/mealTemplates`);
-      await addDoc(templateCollectionRef, {
+      const menusCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/savedMenus`);
+      await addDoc(menusCollectionRef, {
         name: name,
-        recipeIds: dailyMenuIds,
+        recipeIds: currentMenuIds,
         createdAt: Date.now()
       });
-      console.log(`Template "${name}" saved successfully!`);
+      console.log(`Menu "${name}" saved successfully!`);
     } catch (e) {
-      console.error("Error saving template:", e);
+      console.error("Error saving menu:", e);
     }
   };
 
-  const loadTemplate = (recipeIds) => {
-    setDailyMenuIds(recipeIds);
-    console.log("Menu loaded from template!");
+  const loadMenu = (recipeIds) => {
+    setCurrentMenuIds(recipeIds);
+    console.log("Menu loaded!");
   };
 
-  const deleteTemplate = async (templateId) => {
+  const deleteMenu = async (menuId) => {
     if (!isAuthReady || !userId || !db) return;
     
     try {
-      const templateDocRef = doc(db, `/artifacts/${appId}/users/${userId}/mealTemplates`, templateId);
-      await deleteDoc(templateDocRef);
-      console.log("Template deleted.");
+      const menuDocRef = doc(db, `/artifacts/${appId}/users/${userId}/savedMenus`, menuId);
+      await deleteDoc(menuDocRef);
+      console.log("Menu deleted.");
     } catch (e) {
-      console.error("Error deleting template:", e);
+      console.error("Error deleting menu:", e);
     }
   };
 
 
   // --- RENDER HELPERS ---
 
-  const RecipeCardSmall = ({ recipe, isSaved, isDaily, onToggleSave, onToggleDaily, onDelete, recipeId }) => (
-    <div className="bg-white rounded-xl p-3 shadow-sm flex items-center gap-4 transition-all hover:shadow-md">
-      <img 
-        src={recipe.img} 
-        alt={recipe.name} 
-        className="w-20 h-20 rounded-lg object-cover" 
-        onError={(e) => { e.target.onerror = null; e.target.src = `https://placehold.co/80x80/6EE7B7/ffffff?text=${recipe.name.split(' ').map(n=>n[0]).join('')}`; }}
-      />
-      <div className="flex-1 min-w-0">
-        <h4 className="font-bold text-gray-800 truncate">{recipe.name}</h4>
-        <div className="flex flex-wrap gap-2 mt-1 text-xs text-stone-500">
-          <span className="bg-stone-100 px-2 py-0.5 rounded text-stone-600">{recipe.cuisine}</span>
-          <span className="bg-stone-100 px-2 py-0.5 rounded text-stone-600">{recipe.protein}</span>
-        </div>
-        <div className="flex gap-3 mt-2 text-xs text-stone-400">
-          <span className="flex items-center"><Flame size={12} className="mr-1"/> {recipe.cals}</span>
-          <span className="flex items-center"><Clock size={12} className="mr-1"/> {recipe.time}</span>
-        </div>
-      </div>
-      <div className="flex flex-col gap-2">
-        <button 
-          onClick={() => onToggleDaily(recipe.id)}
-          className={`p-2 rounded-full transition-colors ${
-            isDaily 
-              ? 'bg-blue-100 text-blue-600' 
-              : 'bg-stone-100 text-stone-400 hover:bg-stone-200'
-          }`}
-          title={isDaily ? "Remove from Today's Menu" : "Add to Today's Menu"}
-        >
-          <Calendar size={18} />
-        </button>
-        <button 
-          onClick={() => onToggleSave(recipe.id)}
-          className={`p-2 rounded-full transition-colors ${
-            isSaved 
-              ? 'bg-emerald-100 text-emerald-600' 
-              : 'bg-stone-100 text-stone-400 hover:bg-stone-200'
-          }`}
-          title={isSaved ? "Remove from Favorites" : "Add to Favorites"}
-        >
-          <Heart size={18} className={isSaved ? 'fill-emerald-600' : ''} />
-        </button>
-        {onDelete && (
-          <button 
-            onClick={() => onDelete(recipe)}
-            className="p-2 rounded-full transition-colors bg-red-100 text-red-600 hover:bg-red-200"
-            title="Delete Dish (Everyone will lose access)"
-          >
-            <Trash2 size={18} />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-
-
-  // --- RENDER: DAILY MENU MANAGER VIEW (NEW) ---
-  const renderDailyMenuManager = () => {
-    // templateName and setTemplateName are now managed by the parent component (CleanPlateCasino)
-    const currentMenu = getDailyMenuRecipes();
-    const totalCals = currentMenu.reduce((sum, r) => sum + r.cals, 0);
-
-    const handleSaveTemplate = () => {
-      if (templateName.trim() === '') {
-        console.warn('Please enter a name for your template.');
-        return;
-      }
-      saveTemplate(templateName.trim());
-      setTemplateName('');
-    };
+  const RecipeCardSmall = ({ recipe, onAddToMenu, onDelete }) => {
+    // Check if recipe is in any saved menu
+    const recipeId = recipe.id || recipe.name;
+    const isInAnyMenu = savedMenus.some(menu => menu.recipeIds.includes(recipeId));
     
-    const handleTemplateNameChange = (e) => {
-      setTemplateName(e.target.value);
-    };
+    return (
+      <div className="bg-white rounded-2xl overflow-hidden shadow-sm transition-all hover:shadow-lg hover:scale-[1.02] group relative flex flex-col">
+        {/* Image - Square */}
+        <div className="relative w-full aspect-square overflow-hidden">
+          <img 
+            src={recipe.img} 
+            alt={recipe.name} 
+            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" 
+            onError={(e) => { e.target.onerror = null; e.target.src = `https://placehold.co/400x400/6EE7B7/ffffff?text=${recipe.name.split(' ').map(n=>n[0]).join('')}`; }}
+          />
+          {/* Heart button overlay */}
+          <button 
+            onClick={() => onAddToMenu(recipe)}
+            className={`absolute top-2 right-2 p-2 rounded-full transition-all backdrop-blur-sm ${
+              isInAnyMenu 
+                ? 'bg-emerald-500/90 text-white shadow-lg' 
+                : 'bg-white/80 text-stone-400 hover:bg-white hover:text-emerald-600'
+            }`}
+            title="Add to Menu"
+          >
+            <Heart size={18} className={isInAnyMenu ? 'fill-white' : ''} />
+          </button>
+          {/* Delete button overlay (if available) */}
+          {onDelete && (
+            <button 
+              onClick={() => onDelete(recipe)}
+              className="absolute top-2 left-2 p-2 rounded-full transition-all bg-white/80 text-red-500 hover:bg-red-500 hover:text-white backdrop-blur-sm"
+              title="Delete Dish"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
+        
+        {/* Content */}
+        <div className="p-3 flex-1 flex flex-col">
+          <h4 className="font-bold text-gray-800 text-sm mb-2 line-clamp-2">{recipe.name}</h4>
+          
+          {/* Tags */}
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full text-xs font-medium">
+              {recipe.cuisine}
+            </span>
+            <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full text-xs font-medium">
+              {recipe.protein}
+            </span>
+          </div>
+          
+          {/* Stats */}
+          <div className="flex items-center gap-3 text-xs text-stone-500 mt-auto">
+            <span className="flex items-center gap-1">
+              <Flame size={14} className="text-orange-400"/>
+              {recipe.cals} cal
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock size={14} className="text-stone-400"/>
+              {recipe.time}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
+
+  // --- RENDER: MENU MANAGER VIEW ---
+  const renderMenuManager = () => {
     return (
       <div className="min-h-screen bg-stone-50 pb-20">
         <div className="bg-white p-6 sticky top-0 z-10 border-b border-stone-200 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <button 
-              onClick={() => setView('casino')}
-              className="flex items-center text-stone-500 hover:text-emerald-600 font-medium"
-            >
-              <ArrowLeft size={20} className="mr-1" /> Back to Spin
-            </button>
-            <h2 className="text-xl font-bold text-gray-800">Today's Menu & Templates</h2>
+          <div className="flex items-center justify-center mb-4">
+            <h2 className="text-xl font-bold text-gray-800">My Menus</h2>
           </div>
         </div>
 
         <div className="p-6 space-y-8">
           
-          {/* Today's Menu */}
-          <div className="bg-white p-4 rounded-xl shadow-md border border-stone-100">
-            <h3 className="text-lg font-bold text-blue-600 mb-2 flex items-center gap-2">
-              <Calendar size={20} /> Current Daily Plan ({currentMenu.length} dishes)
-            </h3>
-            <p className="text-sm text-stone-500 mb-4">Total Estimated Energy: <span className="font-bold text-gray-800">{totalCals} kcal</span></p>
-
-            {currentMenu.length === 0 ? (
-              <p className="text-stone-400 text-sm italic">Add dishes from the Spin or Browse views to start your plan.</p>
-            ) : (
-              <div className="space-y-3">
-                {currentMenu.map(recipe => (
-                  <div key={recipe.id} className="flex items-center justify-between bg-blue-50 p-2 rounded-lg">
-                    <span className="font-medium text-gray-700">{recipe.name}</span>
-                    <button 
-                      onClick={() => toggleDailyMenu(recipe.id)}
-                      className="text-red-400 hover:text-red-600 p-1 rounded-full bg-blue-100"
-                      title="Remove from Menu"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {currentMenu.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-stone-100">
-                <h4 className="font-bold text-stone-600 mb-2 flex items-center gap-1">
-                  <Save size={16} /> Save as Template
-                </h4>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="e.g., 'Low-Carb Week'"
-                    value={templateName}
-                    onChange={handleTemplateNameChange}
-                    className="flex-1 p-2 border border-stone-300 rounded-lg focus:ring-emerald-500 focus:border-emerald-500 text-sm"
-                  />
-                  <button 
-                    onClick={handleSaveTemplate}
-                    className="bg-emerald-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-emerald-600 transition-colors flex items-center"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Saved Templates */}
+          {/* Saved Menus */}
           <div className="bg-white p-4 rounded-xl shadow-md border border-stone-100">
             <h3 className="text-lg font-bold text-emerald-600 mb-4 flex items-center gap-2">
-              <List size={20} /> Saved Templates ({templates.length})
+              <List size={20} /> Saved Menus ({savedMenus.length})
             </h3>
             
             {!isAuthReady && <p className="text-yellow-600 text-sm">Connecting to storage...</p>}
 
-            {templates.length === 0 ? (
-              <p className="text-stone-400 text-sm italic">Save your first menu above to see templates here!</p>
+            {savedMenus.length === 0 ? (
+              <p className="text-stone-400 text-sm italic">Save your first menu above to see it here!</p>
             ) : (
               <div className="space-y-3">
-                {templates.map(template => (
-                  <div key={template.id} className="flex items-center justify-between bg-emerald-50 p-3 rounded-lg shadow-sm">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-gray-800 truncate">{template.name}</p>
-                      <span className="text-xs text-stone-500">{template.recipeIds.length} dishes</span>
+                {savedMenus.map(menu => {
+                  const menuRecipes = recipes.filter(r => {
+                    const recipeId = r.id || r.name;
+                    return menu.recipeIds.includes(recipeId);
+                  });
+                  const menuTotalCals = menuRecipes.reduce((sum, r) => sum + r.cals, 0);
+                  
+                  return (
+                    <div key={menu.id} className="bg-emerald-50 p-3 rounded-lg shadow-sm">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-gray-800 truncate">{menu.name}</p>
+                          <span className="text-xs text-stone-500">{menu.recipeIds.length} dishes • {menuTotalCals} kcal</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => loadMenu(menu.recipeIds)}
+                            className="bg-emerald-500 text-white text-xs px-3 py-1 rounded-full hover:bg-emerald-600 transition-colors"
+                          >
+                            Load
+                          </button>
+                          <button 
+                            onClick={() => deleteMenu(menu.id)}
+                            className="text-red-500 hover:text-red-700 p-1 rounded-full bg-white shadow-sm"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {menuRecipes.slice(0, 5).map(recipe => (
+                          <span key={recipe.id || recipe.name} className="text-xs bg-white px-2 py-0.5 rounded text-stone-600">
+                            {recipe.name}
+                          </span>
+                        ))}
+                        {menuRecipes.length > 5 && (
+                          <span className="text-xs bg-white px-2 py-0.5 rounded text-stone-400">
+                            +{menuRecipes.length - 5} more
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => loadTemplate(template.recipeIds)}
-                        className="bg-emerald-500 text-white text-xs px-3 py-1 rounded-full hover:bg-emerald-600 transition-colors"
-                      >
-                        Load
-                      </button>
-                      <button 
-                        onClick={() => deleteTemplate(template.id)}
-                        className="text-red-500 hover:text-red-700 p-1 rounded-full bg-white shadow-sm"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -703,12 +723,6 @@ export default function CleanPlateCasino() {
       <div className="min-h-screen bg-stone-50 pb-20">
         <div className="bg-white p-6 sticky top-0 z-10 border-b border-stone-200 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <button 
-              onClick={() => setView('casino')}
-              className="flex items-center text-stone-500 hover:text-emerald-600 font-medium"
-            >
-              <ArrowLeft size={20} className="mr-1" /> Back to Spin
-            </button>
             <h2 className="text-xl font-bold text-gray-800">Browse All</h2>
             <button
               onClick={() => setShowAddForm(true)}
@@ -748,25 +762,24 @@ export default function CleanPlateCasino() {
           </div>
         </div>
 
-        <div className="p-6 grid gap-4">
-          <div className="text-xs text-stone-400 font-bold uppercase tracking-wider mb-2">
-            Showing {filteredRecipes.length} recipes
+        <div className="p-4">
+          <div className="text-xs text-stone-400 font-bold uppercase tracking-wider mb-4 px-2">
+            {filteredRecipes.length} {filteredRecipes.length === 1 ? 'recipe' : 'recipes'}
           </div>
           
-          {filteredRecipes.map((recipe, index) => {
-            const recipeId = recipe.id || recipe.name || index;
-            return (
-              <RecipeCardSmall
-                key={recipeId}
-                recipe={recipe}
-                isSaved={savedIds.includes(recipeId)}
-                isDaily={dailyMenuIds.includes(recipeId)}
-                onToggleSave={() => toggleSave(recipe)}
-                onToggleDaily={() => toggleDailyMenu(recipe)}
-                onDelete={handleDeleteDish}
-              />
-            );
-          })}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-w-4xl mx-auto">
+            {filteredRecipes.map((recipe, index) => {
+              const recipeId = recipe.id || recipe.name || index;
+              return (
+                <RecipeCardSmall
+                  key={recipeId}
+                  recipe={recipe}
+                  onAddToMenu={openMenuSelector}
+                  onDelete={handleDeleteDish}
+                />
+              );
+            })}
+          </div>
 
           {filteredRecipes.length === 0 && (
              <div className="text-center py-10 text-stone-400">
@@ -780,6 +793,95 @@ export default function CleanPlateCasino() {
              </div>
           )}
         </div>
+
+        {/* Menu Selector Modal */}
+        {showMenuSelector && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl p-6 max-w-md w-full">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-800">Add to Menu</h3>
+                <button
+                  onClick={() => {
+                    setShowMenuSelector(false);
+                    setSelectedRecipeForMenu(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              
+              {selectedRecipeForMenu && (
+                <p className="text-sm text-stone-600 mb-4">
+                  Select a menu to add <span className="font-semibold">{selectedRecipeForMenu.name}</span> to:
+                </p>
+              )}
+
+              <div className="space-y-3 max-h-64 overflow-y-auto mb-4">
+                {savedMenus.length === 0 ? (
+                  <p className="text-stone-400 text-sm italic text-center py-4">
+                    No menus yet. Create one below!
+                  </p>
+                ) : (
+                  savedMenus.map(menu => {
+                    const recipeId = selectedRecipeForMenu?.id || selectedRecipeForMenu?.name;
+                    const isAlreadyInMenu = menu.recipeIds.includes(recipeId);
+                    
+                    return (
+                      <button
+                        key={menu.id}
+                        onClick={() => !isAlreadyInMenu && addToMenu(menu.id)}
+                        disabled={isAlreadyInMenu}
+                        className={`w-full p-3 rounded-lg text-left transition-colors ${
+                          isAlreadyInMenu
+                            ? 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                            : 'bg-emerald-50 hover:bg-emerald-100 text-gray-800'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-semibold">{menu.name}</p>
+                            <p className="text-xs text-stone-500">{menu.recipeIds.length} dishes</p>
+                          </div>
+                          {isAlreadyInMenu && (
+                            <span className="text-xs bg-emerald-200 text-emerald-700 px-2 py-1 rounded">
+                              Already added
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="border-t border-stone-200 pt-4">
+                <p className="text-sm font-semibold text-gray-700 mb-2">Or create a new menu:</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Menu name..."
+                    value={templateName}
+                    onChange={(e) => setTemplateName(e.target.value)}
+                    className="flex-1 p-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && templateName.trim()) {
+                        createMenuAndAdd();
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={createMenuAndAdd}
+                    disabled={!templateName.trim()}
+                    className="bg-emerald-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Create & Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Add Dish Modal */}
         {showAddForm && (
@@ -860,20 +962,68 @@ export default function CleanPlateCasino() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Image URL (optional)</label>
-                  <input
-                    type="url"
-                    value={newDish.img}
-                    onChange={(e) => setNewDish({...newDish, img: e.target.value})}
-                    placeholder="https://..."
-                    className="w-full p-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
-                  />
-                  <p className="text-xs text-stone-400 mt-1">Leave empty for auto-generated placeholder</p>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Image (optional)</label>
+                  
+                  {imagePreview ? (
+                    <div className="relative">
+                      <img 
+                        src={imagePreview} 
+                        alt="Preview" 
+                        className="w-full h-48 object-cover rounded-lg border border-stone-300"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRemoveImage}
+                        className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors"
+                        title="Remove image"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-stone-300 border-dashed rounded-lg cursor-pointer bg-stone-50 hover:bg-stone-100 transition-colors">
+                        <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                          <svg className="w-8 h-8 mb-2 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                          </svg>
+                          <p className="mb-2 text-sm text-stone-500">
+                            <span className="font-semibold">Click to upload</span> or drag and drop
+                          </p>
+                          <p className="text-xs text-stone-400">PNG, JPG, GIF up to 5MB</p>
+                        </div>
+                        <input 
+                          type="file" 
+                          className="hidden" 
+                          accept="image/*"
+                          onChange={handleImageSelect}
+                        />
+                      </label>
+                      
+                      <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                          <div className="w-full border-t border-stone-300"></div>
+                        </div>
+                        <div className="relative flex justify-center text-xs uppercase">
+                          <span className="bg-white px-2 text-stone-500">Or</span>
+                        </div>
+                      </div>
+                      
+                      <input
+                        type="url"
+                        value={newDish.img}
+                        onChange={(e) => setNewDish({...newDish, img: e.target.value})}
+                        placeholder="Enter image URL..."
+                        className="w-full p-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="flex gap-3 mt-6">
                 <button
+                  type="button"
                   onClick={() => {
                     setShowAddForm(false);
                     setNewDish({
@@ -884,6 +1034,8 @@ export default function CleanPlateCasino() {
                       time: '',
                       img: ''
                     });
+                    setImageFile(null);
+                    setImagePreview(null);
                   }}
                   className="flex-1 px-4 py-2 border border-stone-300 rounded-lg font-semibold text-gray-700 hover:bg-stone-50"
                 >
@@ -903,110 +1055,6 @@ export default function CleanPlateCasino() {
     );
   };
 
-  // --- RENDER: FAVORITES VIEW (formerly 'menu') ---
-  const renderFavorites = () => {
-    const saved = getSavedRecipes();
-    
-    // Group logic
-    const grouped = saved.reduce((acc, recipe) => {
-      const key = groupBy === 'cuisine' ? recipe.cuisine : recipe.protein;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(recipe);
-      return acc;
-    }, {});
-
-    return (
-      <div className="min-h-screen bg-stone-50 pb-20">
-        {/* Header */}
-        <div className="bg-white p-6 sticky top-0 z-10 border-b border-stone-200 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <button 
-              onClick={() => setView('casino')}
-              className="flex items-center text-stone-500 hover:text-emerald-600 font-medium"
-            >
-              <ArrowLeft size={20} className="mr-1" /> Back to Spin
-            </button>
-            <h2 className="text-xl font-bold text-gray-800">My Favorites</h2>
-          </div>
-
-          {/* Group Toggle */}
-          <div className="flex bg-stone-100 p-1 rounded-lg">
-            <button 
-              onClick={() => setGroupBy('cuisine')}
-              className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${groupBy === 'cuisine' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-            >
-              By Cuisine
-            </button>
-            <button 
-              onClick={() => setGroupBy('protein')}
-              className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${groupBy === 'protein' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-            >
-              By Meat
-            </button>
-          </div>
-        </div>
-
-        {/* List Content */}
-        <div className="p-6 space-y-8">
-          {saved.length === 0 ? (
-            <div className="text-center py-20 text-stone-400">
-              <Heart size={48} className="mx-auto mb-4 opacity-30" />
-              <p>You haven't favorited any recipes yet.</p>
-              <button onClick={() => setView('browse')} className="mt-4 text-emerald-600 font-bold underline">Browse all recipes</button>
-            </div>
-          ) : (
-            Object.keys(grouped).map(group => (
-              <div key={group} className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
-                  <span className="w-2 h-8 bg-emerald-400 rounded-full mr-3"></span>
-                  {group}
-                </h3>
-                <div className="grid gap-4">
-                  {grouped[group].map(recipe => (
-                    <div key={recipe.id} className="bg-white rounded-xl p-3 shadow-sm flex items-center gap-4">
-                      <img 
-                          src={recipe.img} 
-                          alt={recipe.name} 
-                          className="w-20 h-20 rounded-lg object-cover" 
-                          onError={(e) => { e.target.onerror = null; e.target.src = `https://placehold.co/80x80/6EE7B7/ffffff?text=${recipe.name.split(' ').map(n=>n[0]).join('')}`; }}
-                      />
-                      <div className="flex-1">
-                        <h4 className="font-bold text-gray-800">{recipe.name}</h4>
-                        <div className="flex gap-3 mt-1 text-xs text-stone-500">
-                          <span className="flex items-center"><Flame size={12} className="mr-1"/> {recipe.cals} cal</span>
-                          <span className="flex items-center"><Clock size={12} className="mr-1"/> {recipe.time}</span>
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                         <button 
-                            onClick={() => toggleDailyMenu(recipe)}
-                            className={`p-2 rounded-full transition-colors ${
-                              dailyMenuIds.includes(recipe.id || recipe.name)
-                                ? 'bg-blue-100 text-blue-600'
-                                : 'bg-stone-100 text-stone-400 hover:bg-stone-200'
-                            }`}
-                            title="Add to Daily Menu"
-                          >
-                            <Calendar size={18} />
-                          </button>
-                          <button 
-                            onClick={() => toggleSave(recipe)}
-                            className="p-2 text-stone-300 hover:text-red-400 transition-colors"
-                            title="Remove from Favorites"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    );
-  };
 
   // --- RENDER: PRIMARY VIEW ROUTING ---
   if (!isAuthReady) {
@@ -1018,54 +1066,59 @@ export default function CleanPlateCasino() {
     );
   }
 
-  if (view === 'favorites') return renderFavorites();
-  if (view === 'browse') return renderBrowse();
-  if (view === 'dailyMenu') return renderDailyMenuManager();
+  // --- RENDER: TAB NAVIGATION ---
+  const renderTabs = () => {
+    const tabs = [
+      { id: 'spin', label: 'Spin', icon: RefreshCw },
+      { id: 'browse', label: 'Browse', icon: BookOpen },
+      { id: 'menus', label: 'Menus', icon: List, badge: currentMenuCount }
+    ];
 
-  // --- RENDER: CASINO VIEW (Discovery) ---
+    return (
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 shadow-lg z-50">
+        <div className="flex justify-around items-center px-2 py-2">
+          {tabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = view === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setView(tab.id)}
+                className={`flex flex-col items-center justify-center gap-1 px-4 py-2 rounded-lg transition-all relative ${
+                  isActive 
+                    ? 'text-emerald-600 bg-emerald-50' 
+                    : 'text-stone-400 hover:text-stone-600'
+                }`}
+              >
+                <div className="relative">
+                  <Icon size={24} />
+                  {tab.badge !== undefined && tab.badge > 0 && (
+                    <div className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white">
+                      {tab.badge}
+                    </div>
+                  )}
+                </div>
+                <span className={`text-xs font-semibold ${isActive ? 'text-emerald-600' : 'text-stone-400'}`}>
+                  {tab.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
-  return (
-    <div className="min-h-screen bg-stone-50 flex flex-col font-sans text-gray-800">
+  // --- RENDER: SPIN VIEW ---
+  const renderSpin = () => {
+    return (
+      <div className="min-h-screen bg-stone-50 flex flex-col font-sans text-gray-800 pb-20">
       
       {/* Top Bar */}
-      <div className="px-6 pt-6 pb-2 flex justify-between items-center">
+      <div className="px-6 pt-6 pb-2">
         <div>
           <h1 className="text-2xl font-black text-emerald-800 tracking-tight">CLEAN EATS</h1>
           <p className="text-xs text-stone-500 font-medium">RANDOMIZER</p>
-        </div>
-        <div className="flex gap-2">
-           {/* Daily Menu Button */}
-          <button 
-            onClick={() => setView('dailyMenu')}
-            className="relative bg-white p-3 rounded-full shadow-md border border-stone-100 active:scale-95 transition-transform text-stone-600 hover:text-blue-600"
-            title="Today's Menu"
-          >
-            <div className="absolute -top-1 -right-1 bg-blue-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white">
-              {dailyMenuCount}
-            </div>
-            <Calendar size={24} />
-          </button>
-          
-          {/* Browse All Button */}
-          <button 
-            onClick={() => setView('browse')}
-            className="bg-white p-3 rounded-full shadow-md border border-stone-100 active:scale-95 transition-transform text-stone-600 hover:text-emerald-600"
-            title="Browse All"
-          >
-            <BookOpen size={24} />
-          </button>
-          
-          {/* Favorites Button */}
-          <button 
-            onClick={() => setView('favorites')}
-            className="relative bg-white p-3 rounded-full shadow-md border border-stone-100 group active:scale-95 transition-transform"
-            title="My Favorites"
-          >
-            <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white">
-              {savedCount}
-            </div>
-            <Heart size={24} className="text-emerald-600 group-hover:rotate-12 transition-transform fill-emerald-600" />
-          </button>
         </div>
       </div>
 
@@ -1102,30 +1155,13 @@ export default function CleanPlateCasino() {
               
               <div className="p-4 flex justify-between">
                 <div className="flex flex-col gap-2">
-                   {/* Add to Daily Menu Button */}
+                   {/* Add to Menu Button */}
                   <button 
-                    onClick={() => toggleDailyMenu(currentRecipe)}
-                    className={`flex items-center gap-2 px-3 py-1 rounded-full font-bold transition-all transform active:scale-95 text-sm ${
-                      dailyMenuIds.includes(currentRecipe.id || currentRecipe.name)
-                        ? 'bg-blue-600 text-white shadow-md'
-                        : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
-                    }`}
+                    onClick={() => openMenuSelector(currentRecipe)}
+                    className="flex items-center gap-2 px-3 py-1 rounded-full font-bold transition-all transform active:scale-95 text-sm bg-emerald-100 text-emerald-600 hover:bg-emerald-200"
                   >
-                    <Calendar size={16} />
-                    {dailyMenuIds.includes(currentRecipe.id || currentRecipe.name) ? 'Planned' : 'Add to Menu'}
-                  </button>
-                  
-                  {/* Keep/Save to Favorites Button */}
-                  <button 
-                    onClick={() => toggleSave(currentRecipe)}
-                    className={`flex items-center gap-2 px-3 py-1 rounded-full font-bold transition-all transform active:scale-95 text-sm ${
-                      savedIds.includes(currentRecipe.id || currentRecipe.name)
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-gray-900 text-white hover:bg-gray-800'
-                    }`}
-                  >
-                    <Heart size={16} className={savedIds.includes(currentRecipe.id || currentRecipe.name) ? 'fill-emerald-700' : ''} />
-                    {savedIds.includes(currentRecipe.id || currentRecipe.name) ? 'Favorited' : 'Keep'}
+                    <Heart size={16} />
+                    Add to Menu
                   </button>
                 </div>
                 
@@ -1178,7 +1214,33 @@ export default function CleanPlateCasino() {
           
         </div>
       </div>
+      
+      {/* Tab Navigation */}
+      {renderTabs()}
     </div>
-  );
+    );
+  };
+
+  // --- RENDER: PRIMARY VIEW ROUTING ---
+  if (view === 'browse') {
+    return (
+      <>
+        {renderBrowse()}
+        {renderTabs()}
+      </>
+    );
+  }
+  
+  if (view === 'menus') {
+    return (
+      <>
+        {renderMenuManager()}
+        {renderTabs()}
+      </>
+    );
+  }
+
+  // Default: Spin view
+  return renderSpin();
 }
 

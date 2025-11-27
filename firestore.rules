@@ -25,9 +25,9 @@ service cloud.firestore {
       allow read, write: if isOwner(userId);
     }
     
-    // Meal templates - users can only read/write their own templates
-    // Path: /artifacts/{appId}/users/{userId}/mealTemplates/{templateId}
-    match /artifacts/{appId}/users/{userId}/mealTemplates/{templateId} {
+    // Saved menus - users can only read/write their own menus
+    // Path: /artifacts/{appId}/users/{userId}/savedMenus/{menuId}
+    match /artifacts/{appId}/users/{userId}/savedMenus/{menuId} {
       allow read, write: if isOwner(userId);
     }
     
