@@ -546,8 +546,11 @@ export default function CleanPlateCasino() {
   // Delete dish from shared recipes
   const handleDeleteDish = async (recipe) => {
     if (window.confirm('Are you sure you want to delete this dish? Everyone will lose access to it.')) {
-      // If it's a shared recipe (has Firebase doc ID), delete from Firebase
-      if (recipe.id && typeof recipe.id === 'string' && recipe.id.length > 20 && isAuthReady && db) {
+      const recipeId = recipe.id || recipe.name;
+      
+      // If it's a shared recipe (has Firebase doc ID - typically 20 chars), delete from Firebase
+      // Firebase IDs are alphanumeric strings, typically 20 characters long
+      if (recipe.id && typeof recipe.id === 'string' && recipe.id.length >= 20 && !recipe.id.startsWith('local_') && isAuthReady && db) {
         try {
           const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, recipe.id);
           await deleteDoc(recipeDocRef);
@@ -558,17 +561,28 @@ export default function CleanPlateCasino() {
           return;
         }
       } else {
-        // Default recipe or local-only recipe - just remove from local state
-        setRecipes(recipes.filter(r => r !== recipe));
+        // Default recipe or local-only recipe - remove from local state by ID
+        setRecipes(prevRecipes => {
+          return prevRecipes.filter(r => {
+            const rId = r.id || r.name;
+            return rId !== recipeId;
+          });
+        });
       }
       
       // Also remove from current menu if present
-      const recipeId = recipe.id || recipe.name;
-      setCurrentMenuIds(currentMenuIds.filter(did => did !== recipeId));
+      setCurrentMenuIds(prev => prev.filter(did => did !== recipeId));
       
-      // Update current recipe if it was deleted
-      if (currentRecipe === recipe && recipes.length > 1) {
-        setCurrentRecipe(recipes.find(r => r !== recipe) || recipes[0]);
+      // Update current recipe if it was deleted (compare by ID)
+      const currentRecipeId = currentRecipe.id || currentRecipe.name;
+      if (currentRecipeId === recipeId && recipes.length > 1) {
+        const remainingRecipes = recipes.filter(r => {
+          const rId = r.id || r.name;
+          return rId !== recipeId;
+        });
+        if (remainingRecipes.length > 0) {
+          setCurrentRecipe(remainingRecipes[0]);
+        }
       }
     }
   };
