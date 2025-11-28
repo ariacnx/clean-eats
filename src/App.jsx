@@ -15,7 +15,8 @@ import {
   Loader2,
   List,
   Plus,
-  X
+  X,
+  Pencil
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
@@ -62,8 +63,8 @@ const DEFAULT_RECIPES = [
   { id: 13, name: "Tofu Vegetable Curry", cuisine: "Asian", protein: "Vegetarian", cals: 360, time: "30m", img: "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&q=80&w=800" },
 ];
 
-const CUISINES = ["All", "Mediterranean", "Asian", "Mexican", "Italian"];
-const PROTEINS = ["All", "Chicken", "Beef", "Fish", "Vegetarian"];
+const CUISINES = ["All", "Japanese", "American", "Chinese", "Korean", "Mexican", "Italian"];
+const PROTEINS = ["All", "Chicken", "Beef", "Seafood", "Pork","Vegetarian", "Dessert"];
 const HEALTH_TAGS = ["All", "Healthy", "Moderate Healthy", "Guilty Pleasure"];
 
 // Placeholder for Firebase/Auth instances
@@ -135,6 +136,10 @@ export default function CleanPlateCasino() {
   const [lockProtein, setLockProtein] = useState("All");
   const [lockHealthTag, setLockHealthTag] = useState("All");
   const [lockFreeformTag, setLockFreeformTag] = useState("All");
+  
+  // Scroll state for hiding filters on mobile
+  const [lastScrollY, setLastScrollY] = useState(0);
+  const [showFilters, setShowFilters] = useState(true);
 
   // State for the menu name (Crucial for obeying Rules of Hooks)
   const [templateName, setTemplateName] = useState(''); // Reusing this state for menu name
@@ -161,6 +166,11 @@ export default function CleanPlateCasino() {
   
   // Menu display state
   const [viewingMenu, setViewingMenu] = useState(null);
+  
+  // Recipe detail view state
+  const [viewingRecipe, setViewingRecipe] = useState(null);
+  const [editingRecipe, setEditingRecipe] = useState(null);
+  const [recipeNote, setRecipeNote] = useState('');
 
   // Recipes are now shared via Firebase, no need to save to localStorage
   // (localStorage was for user-specific recipes, but now recipes are public/shared)
@@ -370,6 +380,37 @@ export default function CleanPlateCasino() {
     return () => unsubscribe();
   }, [isAuthReady, userId, appId]);
 
+  // Handle scroll to hide/show filters on mobile
+  useEffect(() => {
+    if (view !== 'browse') {
+      setShowFilters(true);
+      return;
+    }
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      
+      // Only hide on mobile (screen width < 768px)
+      if (window.innerWidth < 768) {
+        if (currentScrollY > lastScrollY && currentScrollY > 100) {
+          // Scrolling down - hide filters
+          setShowFilters(false);
+        } else if (currentScrollY < lastScrollY) {
+          // Scrolling up - show filters
+          setShowFilters(true);
+        }
+      } else {
+        // Always show on desktop
+        setShowFilters(true);
+      }
+      
+      setLastScrollY(currentScrollY);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [lastScrollY, view]);
+
   // --- CORE LOGIC FUNCTIONS ---
 
   // Handle image file selection
@@ -492,11 +533,27 @@ export default function CleanPlateCasino() {
     handleSpin();
   };
 
-  // Add new dish to shared recipes (everyone can see it)
+  // Add new dish or update existing dish
   const handleAddDish = async () => {
     if (!newDish.name.trim()) {
       alert('Please enter a dish name');
       return;
+    }
+
+    // Determine image: prioritize imagePreview (new upload), then newDish.img (URL or existing), then placeholder
+    let finalImage = '';
+    if (imagePreview) {
+      // New image uploaded
+      finalImage = imagePreview;
+    } else if (newDish.img && newDish.img.trim()) {
+      // Image URL provided or existing image kept
+      finalImage = newDish.img.trim();
+    } else if (editingRecipe && editingRecipe.img) {
+      // Editing and no new image - keep existing
+      finalImage = editingRecipe.img;
+    } else {
+      // No image - use placeholder
+      finalImage = `https://placehold.co/800x600/d97706/ffffff?text=${newDish.name.trim().split(' ').map(n=>n[0]).join('')}`;
     }
 
     const dish = {
@@ -505,15 +562,27 @@ export default function CleanPlateCasino() {
       protein: newDish.protein,
       cals: parseInt(newDish.cals) || 0,
       time: newDish.time.trim() || '30m',
-      img: newDish.img.trim() || `https://placehold.co/800x600/d97706/ffffff?text=${newDish.name.trim().split(' ').map(n=>n[0]).join('')}`,
+      img: finalImage,
       healthTag: newDish.healthTag || 'Healthy',
       freeformTag: newDish.freeformTag.trim() || '',
-      createdAt: Date.now(),
-      createdBy: userId || 'anonymous'
+      notes: editingRecipe?.notes || '',
+      createdAt: editingRecipe?.createdAt || Date.now(),
+      createdBy: editingRecipe?.createdBy || userId || 'anonymous'
     };
 
-    // Save to Firebase shared recipes collection
-    if (isAuthReady && db) {
+    // If editing, update existing recipe
+    if (editingRecipe && editingRecipe.id && typeof editingRecipe.id === 'string' && editingRecipe.id.length >= 20 && !editingRecipe.id.startsWith('local_') && isAuthReady && db) {
+      try {
+        const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, editingRecipe.id);
+        await updateDoc(recipeDocRef, dish);
+        // Recipe will be updated automatically via the real-time listener
+      } catch (e) {
+        console.error("Error updating recipe in Firebase:", e);
+        alert('Failed to update recipe. Please try again.');
+        return;
+      }
+    } else if (isAuthReady && db) {
+      // Save new recipe to Firebase shared recipes collection
       try {
         const sharedRecipesRef = collection(db, `/artifacts/${appId}/sharedRecipes`);
         await addDoc(sharedRecipesRef, dish);
@@ -525,9 +594,19 @@ export default function CleanPlateCasino() {
       }
     } else {
       // Fallback to local storage if Firebase not available
-      const maxId = recipes.length > 0 ? Math.max(...recipes.map(r => r.id || 0)) : 0;
-      const dishWithId = { ...dish, id: maxId + 1 };
-      setRecipes([...recipes, dishWithId]);
+      if (editingRecipe) {
+        // Update local recipe
+        setRecipes(prevRecipes => prevRecipes.map(r => {
+          const rId = r.id || r.name;
+          const editId = editingRecipe.id || editingRecipe.name;
+          return rId === editId ? { ...r, ...dish } : r;
+        }));
+      } else {
+        // Add new local recipe
+        const maxId = recipes.length > 0 ? Math.max(...recipes.map(r => r.id || 0)) : 0;
+        const dishWithId = { ...dish, id: maxId + 1 };
+        setRecipes([...recipes, dishWithId]);
+      }
     }
 
     setNewDish({
@@ -536,10 +615,13 @@ export default function CleanPlateCasino() {
       protein: 'Chicken',
       cals: '',
       time: '',
-      img: ''
+      img: '',
+      healthTag: 'Healthy',
+      freeformTag: ''
     });
     setImageFile(null);
     setImagePreview(null);
+    setEditingRecipe(null);
     setShowAddForm(false);
   };
 
@@ -743,13 +825,13 @@ export default function CleanPlateCasino() {
     return { label: 'Guilty Pleasure', color: 'bg-pink-100 text-pink-700' };
   };
 
-  const RecipeCardSmall = ({ recipe, onAddToMenu, onDelete }) => {
+  const RecipeCardSmall = ({ recipe, onAddToMenu, onDelete, onView }) => {
     // Check if recipe is in any saved menu
     const recipeId = recipe.id || recipe.name;
     const isInAnyMenu = savedMenus.some(menu => menu.recipeIds.includes(recipeId));
     
     return (
-      <div className="bg-white border border-stone-200 overflow-hidden transition-all hover:border-stone-400 group relative flex flex-col">
+      <div className="bg-white border border-stone-200 overflow-hidden transition-all hover:border-stone-400 group relative flex flex-col cursor-pointer" onClick={() => onView && onView(recipe)}>
         {/* Image - Square */}
         <div className="relative w-full aspect-square overflow-hidden">
           <img 
@@ -761,7 +843,10 @@ export default function CleanPlateCasino() {
           {/* Heart button overlay - Minimalist */}
           {onAddToMenu && (
             <button 
-              onClick={() => onAddToMenu(recipe)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddToMenu(recipe);
+              }}
               className={`absolute top-3 right-3 p-1.5 transition-all ${
                 isInAnyMenu 
                   ? 'text-stone-900' 
@@ -775,7 +860,10 @@ export default function CleanPlateCasino() {
           {/* Delete button overlay - Minimalist */}
           {onDelete && (
             <button 
-              onClick={() => onDelete(recipe)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(recipe);
+              }}
               className="absolute top-3 left-3 p-1.5 text-stone-400 hover:text-stone-900 transition-colors"
               title="Delete Dish"
             >
@@ -1093,7 +1181,9 @@ export default function CleanPlateCasino() {
 
     return (
       <div className="min-h-screen bg-white pb-20">
-        <div className="bg-white p-8 sticky top-0 z-10 border-b border-stone-200">
+        <div className={`bg-white p-8 sticky top-0 z-10 border-b border-stone-200 transition-transform duration-300 ${
+          showFilters ? 'translate-y-0' : '-translate-y-full'
+        }`}>
           <div className="flex items-center justify-between mb-8">
             <div>
               <h2 className="text-3xl font-light text-stone-900 tracking-wider uppercase mb-2">Browse</h2>
@@ -1113,41 +1203,44 @@ export default function CleanPlateCasino() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
              <div>
               <select 
-                value={lockCuisine} 
-                onChange={(e) => setLockCuisine(e.target.value)}
+                value={lockCuisine === "All" ? "" : lockCuisine} 
+                onChange={(e) => setLockCuisine(e.target.value || "All")}
                 className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
               >
-                {CUISINES.map(c => <option key={c} value={c}>{c}</option>)}
+                <option value="" disabled>Cuisines</option>
+                {CUISINES.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             
             <div>
               <select 
-                value={lockProtein} 
-                onChange={(e) => setLockProtein(e.target.value)}
+                value={lockProtein === "All" ? "" : lockProtein} 
+                onChange={(e) => setLockProtein(e.target.value || "All")}
                 className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
               >
-                {PROTEINS.map(p => <option key={p} value={p}>{p}</option>)}
+                <option value="" disabled>Proteins</option>
+                {PROTEINS.filter(p => p !== 'All').map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
 
             <div>
               <select 
-                value={lockHealthTag} 
-                onChange={(e) => setLockHealthTag(e.target.value)}
+                value={lockHealthTag === "All" ? "" : lockHealthTag} 
+                onChange={(e) => setLockHealthTag(e.target.value || "All")}
                 className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
               >
-                {HEALTH_TAGS.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                <option value="" disabled>Health Levels</option>
+                {HEALTH_TAGS.filter(tag => tag !== 'All').map(tag => <option key={tag} value={tag}>{tag}</option>)}
               </select>
             </div>
             
             <div>
               <select 
-                value={lockFreeformTag} 
-                onChange={(e) => setLockFreeformTag(e.target.value)}
+                value={lockFreeformTag === "All" ? "" : lockFreeformTag} 
+                onChange={(e) => setLockFreeformTag(e.target.value || "All")}
                 className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
               >
-                <option value="All">All Tags</option>
+                <option value="" disabled>Others</option>
                 {allFreeformTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
               </select>
             </div>
@@ -1164,6 +1257,10 @@ export default function CleanPlateCasino() {
                   recipe={recipe}
                   onAddToMenu={openMenuSelector}
                   onDelete={handleDeleteDish}
+                  onView={(recipe) => {
+                    setViewingRecipe(recipe);
+                    setRecipeNote(recipe.notes || '');
+                  }}
                 />
               );
             })}
@@ -1273,13 +1370,214 @@ export default function CleanPlateCasino() {
           </div>
         )}
 
-        {/* Add Dish Modal - Minimalist */}
+        {/* Recipe Detail Modal - Minimalist */}
+        {viewingRecipe && (
+          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div className="max-w-2xl w-full my-12">
+              <div className="flex justify-end mb-8">
+                <button
+                  onClick={() => {
+                    setViewingRecipe(null);
+                    setRecipeNote('');
+                  }}
+                  className="text-stone-400 hover:text-stone-900 transition-colors p-2"
+                  aria-label="Close"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              
+              {/* Recipe Image */}
+              <div className="mb-8">
+                <img 
+                  src={viewingRecipe.img} 
+                  alt={viewingRecipe.name}
+                  className="w-full h-64 object-cover border border-stone-200"
+                  onError={(e) => { 
+                    e.target.onerror = null; 
+                    e.target.src = `https://placehold.co/800x400/f5f5f4/78716c?text=${viewingRecipe.name.split(' ').map(n=>n[0]).join('')}`; 
+                  }}
+                />
+              </div>
+              
+              {/* Recipe Header */}
+              <div className="text-center mb-12 border-b border-stone-200 pb-8">
+                <h2 className="text-4xl font-light text-stone-900 tracking-wider uppercase mb-4">
+                  {viewingRecipe.name}
+                </h2>
+                <div className="flex items-center justify-center gap-4 text-xs text-stone-500 uppercase tracking-wider">
+                  <span>{viewingRecipe.cuisine}</span>
+                  <span className="text-stone-300">•</span>
+                  <span>{viewingRecipe.protein}</span>
+                  <span className="text-stone-300">•</span>
+                  <span>{viewingRecipe.time}</span>
+                </div>
+              </div>
+              
+              {/* Recipe Details */}
+              <div className="space-y-8 mb-12">
+                <div className="flex items-start justify-between border-b border-stone-100 pb-6">
+                  <div>
+                    <div className="text-xs text-stone-400 uppercase tracking-widest mb-2">Calories</div>
+                    <div className="text-3xl font-light text-stone-900 tracking-wide">
+                      {viewingRecipe.cals}
+                      <span className="text-lg text-stone-500 ml-2">kcal</span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Tags */}
+                <div className="border-b border-stone-100 pb-6">
+                  <div className="text-xs text-stone-400 uppercase tracking-widest mb-4">Tags</div>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-[10px] text-stone-400 uppercase tracking-widest mb-2">Cuisine</div>
+                      <div className="flex flex-wrap gap-3">
+                        <span className="bg-stone-100 text-stone-600 px-3 py-1.5 rounded text-xs font-light tracking-wide">
+                          {viewingRecipe.cuisine}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-stone-400 uppercase tracking-widest mb-2">Protein</div>
+                      <div className="flex flex-wrap gap-3">
+                        <span className="bg-stone-100 text-stone-600 px-3 py-1.5 rounded text-xs font-light tracking-wide">
+                          {viewingRecipe.protein}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-stone-400 uppercase tracking-widest mb-2">Health Level</div>
+                      <div className="flex flex-wrap gap-3">
+                        {(() => {
+                          const healthTag = getHealthTag(viewingRecipe.cals || 0, viewingRecipe.healthTag);
+                          return (
+                            <span className={`${healthTag.color} px-3 py-1.5 rounded text-xs font-light tracking-wide`}>
+                              {healthTag.label}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                    {viewingRecipe.freeformTag && (
+                      <div>
+                        <div className="text-[10px] text-stone-400 uppercase tracking-widest mb-2">Custom Tags</div>
+                        <div className="flex flex-wrap gap-3">
+                          <span className="bg-stone-100 text-stone-600 px-3 py-1.5 rounded text-xs font-light tracking-wide">
+                            {viewingRecipe.freeformTag}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Notes Section */}
+                <div className="border-b border-stone-100 pb-6">
+                  <div className="text-xs text-stone-400 uppercase tracking-widest mb-4">Recipe Notes</div>
+                  <textarea
+                    value={recipeNote}
+                    onChange={(e) => setRecipeNote(e.target.value)}
+                    placeholder="Add your recipe notes, ingredients, instructions, or any other details here..."
+                    className="w-full p-4 border border-stone-200 focus:border-stone-900 focus:outline-none bg-transparent resize-none font-light text-stone-900 leading-relaxed min-h-[200px]"
+                    rows={8}
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!viewingRecipe || !isAuthReady || !db) return;
+                      
+                      const recipeId = viewingRecipe.id || viewingRecipe.name;
+                      
+                      // If it's a Firebase recipe, save notes to Firebase
+                      if (viewingRecipe.id && typeof viewingRecipe.id === 'string' && viewingRecipe.id.length >= 20 && !viewingRecipe.id.startsWith('local_')) {
+                        try {
+                          const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, viewingRecipe.id);
+                          await updateDoc(recipeDocRef, { notes: recipeNote });
+                          // Update local state
+                          setRecipes(prevRecipes => prevRecipes.map(r => {
+                            const rId = r.id || r.name;
+                            return rId === recipeId ? { ...r, notes: recipeNote } : r;
+                          }));
+                          alert('Notes saved!');
+                        } catch (e) {
+                          console.error("Error saving notes:", e);
+                          alert('Failed to save notes. Please try again.');
+                        }
+                      } else {
+                        // Local recipe - update local state
+                        setRecipes(prevRecipes => prevRecipes.map(r => {
+                          const rId = r.id || r.name;
+                          return rId === recipeId ? { ...r, notes: recipeNote } : r;
+                        }));
+                        alert('Notes saved!');
+                      }
+                    }}
+                    className="mt-4 text-stone-900 hover:text-stone-600 text-sm uppercase tracking-widest border-b border-stone-900 hover:border-stone-600 transition-colors pb-1"
+                  >
+                    Save Notes
+                  </button>
+                </div>
+              </div>
+              
+              {/* Action Buttons */}
+              <div className="flex gap-4 border-t border-stone-200 pt-8">
+                <button
+                  onClick={() => {
+                    setViewingRecipe(null);
+                    setEditingRecipe(viewingRecipe);
+                    setNewDish({
+                      name: viewingRecipe.name,
+                      cuisine: viewingRecipe.cuisine,
+                      protein: viewingRecipe.protein,
+                      cals: viewingRecipe.cals.toString(),
+                      time: viewingRecipe.time,
+                      img: viewingRecipe.img,
+                      healthTag: viewingRecipe.healthTag || 'Healthy',
+                      freeformTag: viewingRecipe.freeformTag || ''
+                    });
+                    setImagePreview(null);
+                    setImageFile(null);
+                    setRecipeNote(viewingRecipe.notes || '');
+                    setShowAddForm(true);
+                  }}
+                  className="flex-1 text-stone-900 hover:text-stone-600 text-sm uppercase tracking-widest border-b border-stone-900 hover:border-stone-600 transition-colors pb-1 flex items-center justify-center gap-2"
+                >
+                  <Pencil size={16} strokeWidth={1.5} />
+                  Edit
+                </button>
+                <button
+                  onClick={() => setViewingRecipe(null)}
+                  className="flex-1 text-stone-600 hover:text-stone-900 text-sm uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add/Edit Dish Modal - Minimalist */}
         {showAddForm && (
           <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto">
             <div className="max-w-md w-full my-12">
               <div className="flex justify-end mb-8">
                 <button
-                  onClick={() => setShowAddForm(false)}
+                  onClick={() => {
+                    setShowAddForm(false);
+                    setEditingRecipe(null);
+                    setNewDish({
+                      name: '',
+                      cuisine: 'Mediterranean',
+                      protein: 'Chicken',
+                      cals: '',
+                      time: '',
+                      img: '',
+                      healthTag: 'Healthy',
+                      freeformTag: ''
+                    });
+                    setImageFile(null);
+                    setImagePreview(null);
+                  }}
                   className="text-stone-400 hover:text-stone-900 transition-colors p-2"
                   aria-label="Close"
                 >
@@ -1288,7 +1586,9 @@ export default function CleanPlateCasino() {
               </div>
               
               <div className="text-center mb-12 border-b border-stone-200 pb-8">
-                <h3 className="text-2xl font-light text-stone-900 tracking-wide uppercase">Add New Dish</h3>
+                <h3 className="text-2xl font-light text-stone-900 tracking-wide uppercase">
+                  {editingRecipe ? 'Edit Dish' : 'Add New Dish'}
+                </h3>
               </div>
               
               <div className="space-y-6">
@@ -1357,7 +1657,7 @@ export default function CleanPlateCasino() {
 
                 <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Health Tag</label>
+                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Health Level</label>
                     <select
                       value={newDish.healthTag}
                       onChange={(e) => setNewDish({...newDish, healthTag: e.target.value})}
@@ -1370,7 +1670,7 @@ export default function CleanPlateCasino() {
                   </div>
 
                   <div>
-                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Freeform Tag</label>
+                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Custom Tags</label>
                     <input
                       type="text"
                       value={newDish.freeformTag}
@@ -1384,10 +1684,10 @@ export default function CleanPlateCasino() {
                 <div>
                   <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Image</label>
                   
-                  {imagePreview ? (
+                  {(imagePreview || (editingRecipe && editingRecipe.img && !imagePreview && (newDish.img || newDish.img === editingRecipe.img))) ? (
                     <div className="relative">
                       <img 
-                        src={imagePreview} 
+                        src={imagePreview || newDish.img || editingRecipe?.img} 
                         alt="Preview" 
                         className="w-full h-48 object-cover border border-stone-200"
                       />
@@ -1441,6 +1741,7 @@ export default function CleanPlateCasino() {
                   type="button"
                   onClick={() => {
                     setShowAddForm(false);
+                    setEditingRecipe(null);
                     setNewDish({
                       name: '',
                       cuisine: 'Mediterranean',
@@ -1462,7 +1763,7 @@ export default function CleanPlateCasino() {
                   onClick={handleAddDish}
                   className="flex-1 text-stone-900 hover:text-stone-600 text-sm uppercase tracking-widest border-b border-stone-900 hover:border-stone-600 transition-colors pb-1"
                 >
-                  Add Dish
+                  {editingRecipe ? 'Save Changes' : 'Add Dish'}
                 </button>
               </div>
             </div>
