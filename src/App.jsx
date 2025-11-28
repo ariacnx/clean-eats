@@ -1182,8 +1182,8 @@ export default function CleanPlateCasino() {
         
         {/* Restaurant Menu Display Modal - Minimalist Japanese Style */}
         {viewingMenu && (
-          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 overflow-y-auto" style={{ overflow: 'hidden' }} onWheel={(e) => e.stopPropagation()}>
-            <div className="max-w-3xl w-full my-12 px-6 pb-32">
+          <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+            <div className="max-w-3xl w-full mx-auto px-6 py-12 pb-32">
               {/* Toggle and Close Button - Top */}
               <div className="flex justify-between items-center mb-8">
                 <button
@@ -1426,8 +1426,8 @@ export default function CleanPlateCasino() {
 
         {/* Menu Selector Modal - Minimalist */}
         {showMenuSelector && (
-          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ overflow: 'hidden' }} onWheel={(e) => e.stopPropagation()}>
-            <div className="max-w-md w-full my-12">
+          <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+            <div className="max-w-md w-full mx-auto px-4 py-12 pb-32">
               <div className="flex justify-end mb-8">
                 <button
                   onClick={() => {
@@ -1698,8 +1698,8 @@ export default function CleanPlateCasino() {
 
         {/* Add/Edit Dish Modal - Minimalist */}
         {showAddForm && (
-          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ overflow: 'hidden' }} onWheel={(e) => e.stopPropagation()}>
-            <div className="max-w-md w-full my-12">
+          <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+            <div className="max-w-md w-full mx-auto px-4 py-12 pb-32">
               <div className="flex justify-end mb-8">
                 <button
                   onClick={() => {
@@ -2120,8 +2120,8 @@ export default function CleanPlateCasino() {
       
       {/* Menu Selector Modal - Minimalist */}
       {showMenuSelector && (
-        <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ overflow: 'hidden' }} onWheel={(e) => e.stopPropagation()}>
-          <div className="max-w-md w-full my-12">
+        <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+          <div className="max-w-md w-full mx-auto px-4 py-12 pb-32">
             <div className="flex justify-end mb-8">
               <button
                 onClick={() => {
