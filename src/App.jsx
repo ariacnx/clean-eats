@@ -171,6 +171,11 @@ export default function CleanPlateCasino() {
   const [viewingRecipe, setViewingRecipe] = useState(null);
   const [editingRecipe, setEditingRecipe] = useState(null);
   const [recipeNote, setRecipeNote] = useState('');
+  
+  // Menu editing state
+  const [editingMenuId, setEditingMenuId] = useState(null);
+  const [editingMenuName, setEditingMenuName] = useState('');
+  const [showCalories, setShowCalories] = useState(true);
 
   // Recipes are now shared via Firebase, no need to save to localStorage
   // (localStorage was for user-specific recipes, but now recipes are public/shared)
@@ -410,6 +415,36 @@ export default function CleanPlateCasino() {
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, [lastScrollY, view]);
+
+  // Prevent body scrolling when modals are open (but allow modal content to scroll)
+  useEffect(() => {
+    const hasOpenModal = showAddForm || viewingRecipe || showMenuSelector || viewingMenu;
+    if (hasOpenModal) {
+      // Save current scroll position
+      const scrollY = window.scrollY;
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = '100%';
+      document.body.style.overflow = 'hidden';
+    } else {
+      // Restore scroll position
+      const scrollY = document.body.style.top;
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      document.body.style.overflow = '';
+      if (scrollY) {
+        window.scrollTo(0, parseInt(scrollY || '0') * -1);
+      }
+    }
+    return () => {
+      // Cleanup on unmount
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      document.body.style.overflow = '';
+    };
+  }, [showAddForm, viewingRecipe, showMenuSelector, viewingMenu]);
 
   // --- CORE LOGIC FUNCTIONS ---
 
@@ -805,6 +840,47 @@ export default function CleanPlateCasino() {
     }
   };
 
+  const updateMenuName = async (menuId, newName) => {
+    if (!newName || !newName.trim()) {
+      alert('Menu name cannot be empty');
+      return;
+    }
+    
+    if (!isAuthReady || !userId || !db) {
+      // Fallback to localStorage
+      try {
+        const savedMenusLocal = JSON.parse(localStorage.getItem('cleaneats_savedMenus') || '[]');
+        const updatedMenus = savedMenusLocal.map(menu => 
+          menu.id === menuId ? { ...menu, name: newName.trim() } : menu
+        );
+        localStorage.setItem('cleaneats_savedMenus', JSON.stringify(updatedMenus));
+        setSavedMenus(updatedMenus);
+        setEditingMenuId(null);
+        setEditingMenuName('');
+        return;
+      } catch (e) {
+        console.error("Error updating menu name locally:", e);
+        alert('Failed to update menu name. Please try again.');
+        return;
+      }
+    }
+    
+    try {
+      const menuDocRef = doc(db, `/artifacts/${appId}/users/${userId}/savedMenus`, menuId);
+      await updateDoc(menuDocRef, { name: newName.trim() });
+      // Update local state immediately
+      setSavedMenus(prev => prev.map(menu => 
+        menu.id === menuId ? { ...menu, name: newName.trim() } : menu
+      ));
+      setEditingMenuId(null);
+      setEditingMenuName('');
+      console.log("Menu name updated.");
+    } catch (e) {
+      console.error("Error updating menu name:", e);
+      alert('Failed to update menu name. Please try again.');
+    }
+  };
+
 
   // --- RENDER HELPERS ---
 
@@ -896,7 +972,7 @@ export default function CleanPlateCasino() {
     const currentMenuTotalCals = currentMenuRecipes.reduce((sum, r) => sum + r.cals, 0);
 
     return (
-      <div className="min-h-screen bg-white pb-20">
+      <div className="min-h-screen bg-white pb-32">
         <div className="bg-white p-8 sticky top-0 z-10 border-b border-stone-200">
           <div className="text-center">
             <h2 className="text-3xl font-light text-stone-900 tracking-wider uppercase mb-2">My Menus</h2>
@@ -1027,7 +1103,42 @@ export default function CleanPlateCasino() {
                     <div key={menu.id} className="border-b border-stone-100 pb-6 last:border-0">
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex-1">
-                          <h4 className="text-xl font-light text-stone-900 mb-2 tracking-wide">{menu.name}</h4>
+                          {editingMenuId === menu.id ? (
+                            <div className="flex items-center gap-3 mb-2">
+                              <input
+                                type="text"
+                                value={editingMenuName}
+                                onChange={(e) => setEditingMenuName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    updateMenuName(menu.id, editingMenuName);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingMenuId(null);
+                                    setEditingMenuName('');
+                                  }
+                                }}
+                                className="flex-1 text-xl font-light text-stone-900 tracking-wide border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => updateMenuName(menu.id, editingMenuName)}
+                                className="text-stone-600 hover:text-stone-900 text-xs uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingMenuId(null);
+                                  setEditingMenuName('');
+                                }}
+                                className="text-stone-400 hover:text-stone-900 transition-colors"
+                              >
+                                <X size={16} strokeWidth={1.5} />
+                              </button>
+                            </div>
+                          ) : (
+                            <h4 className="text-xl font-light text-stone-900 mb-2 tracking-wide">{menu.name}</h4>
+                          )}
                           <div className="flex items-center gap-4 text-xs text-stone-500 uppercase tracking-wider">
                             <span>{menu.recipeIds.length} {menu.recipeIds.length === 1 ? 'Dish' : 'Dishes'}</span>
                             <span className="text-stone-300">•</span>
@@ -1041,6 +1152,18 @@ export default function CleanPlateCasino() {
                           >
                             View
                           </button>
+                          {editingMenuId !== menu.id && (
+                            <button 
+                              onClick={() => {
+                                setEditingMenuId(menu.id);
+                                setEditingMenuName(menu.name);
+                              }}
+                              className="text-stone-400 hover:text-stone-900 transition-colors"
+                              title="Edit menu name"
+                            >
+                              <Pencil size={16} strokeWidth={1.5} />
+                            </button>
+                          )}
                           <button 
                             onClick={() => deleteMenu(menu.id)}
                             className="text-stone-400 hover:text-stone-900 transition-colors"
@@ -1059,14 +1182,21 @@ export default function CleanPlateCasino() {
         
         {/* Restaurant Menu Display Modal - Minimalist Japanese Style */}
         {viewingMenu && (
-          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 overflow-y-auto">
-            <div className="max-w-3xl w-full my-12 px-6">
-              {/* Close Button - Top Right */}
-              <div className="flex justify-end mb-8">
+          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 overflow-y-auto" style={{ overflow: 'hidden' }} onWheel={(e) => e.stopPropagation()}>
+            <div className="max-w-3xl w-full my-12 px-6 pb-32">
+              {/* Toggle and Close Button - Top */}
+              <div className="flex justify-between items-center mb-8">
+                <button
+                  onClick={() => setShowCalories(!showCalories)}
+                  className="text-stone-400 hover:text-stone-900 text-xs uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
+                >
+                  {showCalories ? 'Hide Calories' : 'Show Calories'}
+                </button>
                 <button
                   onClick={() => {
                     loadMenu(viewingMenu.recipeIds);
                     setViewingMenu(null);
+                    setShowCalories(true); // Reset to default when closing
                   }}
                   className="text-stone-400 hover:text-stone-800 transition-colors p-2"
                   aria-label="Close"
@@ -1096,29 +1226,36 @@ export default function CleanPlateCasino() {
                     return (
                       <div key={recipe.id || recipe.name || index} className="border-b border-stone-100 pb-8 last:border-0 last:pb-0">
                         <div className="flex items-start justify-between gap-8">
-                          {/* Left: Name and Details */}
-                          <div className="flex-1">
-                            <h3 className="text-2xl font-light text-stone-900 mb-2 tracking-wide">
-                              {recipe.name}
-                            </h3>
-                            <div className="flex items-center gap-4 text-xs text-stone-500 uppercase tracking-wider mt-3">
-                              <span>{recipe.cuisine}</span>
-                              <span className="text-stone-300">•</span>
-                              <span>{recipe.protein}</span>
-                              <span className="text-stone-300">•</span>
-                              <span>{recipe.time}</span>
+                          {/* Left: Number, Name and Details */}
+                          <div className="flex-1 flex items-start gap-4">
+                            <span className="text-stone-400 text-xl font-light tracking-wide mt-1">
+                              {index + 1}
+                            </span>
+                            <div className="flex-1">
+                              <h3 className="text-2xl font-light text-stone-900 mb-2 tracking-wide">
+                                {recipe.name}
+                              </h3>
+                              <div className="flex items-center gap-4 text-xs text-stone-500 uppercase tracking-wider mt-3">
+                                <span>{recipe.cuisine}</span>
+                                <span className="text-stone-300">•</span>
+                                <span>{recipe.protein}</span>
+                                <span className="text-stone-300">•</span>
+                                <span>{recipe.time}</span>
+                              </div>
                             </div>
                           </div>
                           
-                          {/* Right: Calories - Minimalist */}
-                          <div className="text-right">
-                            <div className="text-xl font-light text-stone-700 tracking-wide">
-                              {recipe.cals}
+                          {/* Right: Calories - Minimalist (conditionally shown) */}
+                          {showCalories && (
+                            <div className="text-right">
+                              <div className="text-xl font-light text-stone-700 tracking-wide">
+                                {recipe.cals}
+                              </div>
+                              <div className="text-[10px] text-stone-400 uppercase tracking-widest mt-1">
+                                kcal
+                              </div>
                             </div>
-                            <div className="text-[10px] text-stone-400 uppercase tracking-widest mt-1">
-                              kcal
-                            </div>
-                          </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1127,20 +1264,23 @@ export default function CleanPlateCasino() {
               
               {/* Menu Footer - Subtle */}
               <div className="border-t border-stone-200 pt-8 text-center">
-                <div className="mb-6">
-                  <div className="text-xs text-stone-400 uppercase tracking-widest mb-2">Total</div>
-                  <div className="text-3xl font-light text-stone-900 tracking-wide">
-                    {recipes.filter(r => {
-                      const recipeId = r.id || r.name;
-                      return viewingMenu.recipeIds.includes(recipeId);
-                    }).reduce((sum, r) => sum + r.cals, 0)}
-                    <span className="text-lg text-stone-500 ml-2">kcal</span>
+                {showCalories && (
+                  <div className="mb-6">
+                    <div className="text-xs text-stone-400 uppercase tracking-widest mb-2">Total</div>
+                    <div className="text-3xl font-light text-stone-900 tracking-wide">
+                      {recipes.filter(r => {
+                        const recipeId = r.id || r.name;
+                        return viewingMenu.recipeIds.includes(recipeId);
+                      }).reduce((sum, r) => sum + r.cals, 0)}
+                      <span className="text-lg text-stone-500 ml-2">kcal</span>
+                    </div>
                   </div>
-                </div>
+                )}
                 <button
                   onClick={() => {
                     loadMenu(viewingMenu.recipeIds);
                     setViewingMenu(null);
+                    setShowCalories(true); // Reset to default when closing
                   }}
                   className="text-stone-600 hover:text-stone-900 text-sm uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
                 >
@@ -1180,7 +1320,7 @@ export default function CleanPlateCasino() {
     });
 
     return (
-      <div className="min-h-screen bg-white pb-20">
+      <div className="min-h-screen bg-white pb-32">
         <div className={`bg-white p-8 sticky top-0 z-10 border-b border-stone-200 transition-transform duration-300 ${
           showFilters ? 'translate-y-0' : '-translate-y-full'
         }`}>
@@ -1286,7 +1426,7 @@ export default function CleanPlateCasino() {
 
         {/* Menu Selector Modal - Minimalist */}
         {showMenuSelector && (
-          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ overflow: 'hidden' }} onWheel={(e) => e.stopPropagation()}>
             <div className="max-w-md w-full my-12">
               <div className="flex justify-end mb-8">
                 <button
@@ -1372,8 +1512,8 @@ export default function CleanPlateCasino() {
 
         {/* Recipe Detail Modal - Minimalist */}
         {viewingRecipe && (
-          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto">
-            <div className="max-w-2xl w-full my-12">
+          <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+            <div className="max-w-2xl w-full mx-auto px-4 py-12 pb-32">
               <div className="flex justify-end mb-8">
                 <button
                   onClick={() => {
@@ -1520,7 +1660,7 @@ export default function CleanPlateCasino() {
               </div>
               
               {/* Action Buttons */}
-              <div className="flex gap-4 border-t border-stone-200 pt-8">
+              <div className="flex gap-4 border-t border-stone-200 pt-8 pb-8">
                 <button
                   onClick={() => {
                     setViewingRecipe(null);
@@ -1558,7 +1698,7 @@ export default function CleanPlateCasino() {
 
         {/* Add/Edit Dish Modal - Minimalist */}
         {showAddForm && (
-          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ overflow: 'hidden' }} onWheel={(e) => e.stopPropagation()}>
             <div className="max-w-md w-full my-12">
               <div className="flex justify-end mb-8">
                 <button
@@ -1793,8 +1933,8 @@ export default function CleanPlateCasino() {
     ];
 
     return (
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 z-50">
-        <div className="flex justify-around items-center px-2 py-3">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 z-50 pb-safe">
+        <div className="flex justify-around items-center px-2 py-4">
           {tabs.map(tab => {
             const Icon = tab.icon;
             const isActive = view === tab.id;
@@ -1830,7 +1970,7 @@ export default function CleanPlateCasino() {
   // --- RENDER: SPIN VIEW ---
   const renderSpin = () => {
     return (
-      <div className="min-h-screen bg-white flex flex-col font-sans text-stone-900 pb-20">
+      <div className="min-h-screen bg-white flex flex-col font-sans text-stone-900 pb-32">
       
       {/* Top Bar */}
       <div className="px-8 pt-8 pb-4">
@@ -1980,7 +2120,7 @@ export default function CleanPlateCasino() {
       
       {/* Menu Selector Modal - Minimalist */}
       {showMenuSelector && (
-        <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-white flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ overflow: 'hidden' }} onWheel={(e) => e.stopPropagation()}>
           <div className="max-w-md w-full my-12">
             <div className="flex justify-end mb-8">
               <button
