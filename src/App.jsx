@@ -33,6 +33,12 @@ import {
   query, 
   where 
 } from 'firebase/firestore';
+import {
+  getStorage,
+  ref,
+  uploadBytes,
+  getDownloadURL
+} from 'firebase/storage';
 
 // Import constants
 import { DEFAULT_RECIPES, INSPIRATION_RECIPES, CUISINES, PROTEINS, HEALTH_TAGS } from './constants';
@@ -72,8 +78,9 @@ import { MenuDisplayModal } from './components/MenuDisplayModal';
 import { RecipeCard } from './components/RecipeCard';
 import { SlotReel } from './components/SlotReel';
 
-// Placeholder for Firebase instance
+// Placeholder for Firebase instances
 let db = null;
+let storage = null;
 
 // --- MAIN APP COMPONENT ---
 export default function CleanPlateCasino() {
@@ -178,6 +185,7 @@ export default function CleanPlateCasino() {
       }
       const app = initializeApp(firebaseConfig);
       db = getFirestore(app);
+      storage = getStorage(app);
       
       // Set isFirebaseReady to true immediately after Firebase is initialized
       setIsFirebaseReady(true);
@@ -342,8 +350,114 @@ export default function CleanPlateCasino() {
 
   // --- CORE LOGIC FUNCTIONS ---
 
+  // Compress and resize image to reduce file size (for preview)
+  const compressImage = (file, maxWidth = 800, maxHeight = 600, quality = 0.8) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          // Calculate new dimensions
+          if (width > height) {
+            if (width > maxWidth) {
+              height = (height * maxWidth) / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = (width * maxHeight) / height;
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Convert to base64 with compression (for preview only)
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressedDataUrl);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Upload image to Firebase Storage and return download URL
+  const uploadImageToStorage = async (file, spaceId) => {
+    if (!storage || !spaceId) {
+      throw new Error('Storage or spaceId not initialized');
+    }
+
+    // Compress image before uploading
+    const compressedBlob = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          // Resize to max 1200x900 for storage (larger than preview)
+          const maxWidth = 1200;
+          const maxHeight = 900;
+          
+          if (width > height) {
+            if (width > maxWidth) {
+              height = (height * maxWidth) / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = (width * maxHeight) / height;
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob((blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to compress image'));
+            }
+          }, 'image/jpeg', 0.85);
+        };
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = e.target.result;
+      };
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+
+    // Create a unique filename
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(2, 9);
+    const fileName = `recipes/${spaceId}/${timestamp}_${randomId}.jpg`;
+
+    // Upload to Firebase Storage
+    const storageRef = ref(storage, fileName);
+    await uploadBytes(storageRef, compressedBlob);
+
+    // Get download URL
+    const downloadURL = await getDownloadURL(storageRef);
+    return downloadURL;
+  };
+
   // Handle image file selection
-  const handleImageSelect = (e) => {
+  const handleImageSelect = async (e) => {
     const file = e.target.files[0];
     if (file) {
       // Validate file type
@@ -352,21 +466,25 @@ export default function CleanPlateCasino() {
         return;
       }
       
-      // Validate file size (max 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        alert('Image size must be less than 5MB.');
+      // Validate file size (max 10MB - Storage can handle larger files)
+      if (file.size > 10 * 1024 * 1024) {
+        alert('Image size must be less than 10MB.');
         return;
       }
 
       setImageFile(file);
       
-      // Create preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result);
-        setNewDish({...newDish, img: reader.result}); // Set as base64 data URL
-      };
-      reader.readAsDataURL(file);
+      // Create preview (compressed for display only)
+      try {
+        const previewDataUrl = await compressImage(file, 400, 300, 0.7);
+        setImagePreview(previewDataUrl);
+        // Don't set img in newDish yet - we'll upload to Storage when saving
+      } catch (error) {
+        console.error('Error processing image preview:', error);
+        alert('Error processing image. Please try a different image.');
+        setImageFile(null);
+        setImagePreview(null);
+      }
     }
   };
 
@@ -475,14 +593,38 @@ export default function CleanPlateCasino() {
       return;
     }
 
-    // Determine image: prioritize imagePreview (new upload), then newDish.img (URL or existing), then placeholder
+    // Check if Firebase is ready
+    if (!isFirebaseReady || !db) {
+      alert('Firebase is not ready. Please wait a moment and try again.');
+      return;
+    }
+
+    // Determine image: upload new image to Storage, or use existing URL, or placeholder
     let finalImage = '';
-    if (imagePreview) {
-      // New image uploaded
-      finalImage = imagePreview;
+    
+    if (imageFile) {
+      if (storage && spaceId) {
+        // New image uploaded - upload to Firebase Storage
+        try {
+          finalImage = await uploadImageToStorage(imageFile, spaceId);
+        } catch (e) {
+          console.error("Error uploading image to Storage:", e);
+          alert('Failed to upload image. Please enable Firebase Storage in the Firebase Console or use an image URL instead.');
+          return;
+        }
+      } else {
+        alert('Firebase Storage is not available. Please enable Storage in Firebase Console or use an image URL instead.');
+        return;
+      }
     } else if (newDish.img && newDish.img.trim()) {
-      // Image URL provided or existing image kept
-      finalImage = newDish.img.trim();
+      // Image URL provided (not a base64 data URL)
+      if (!newDish.img.startsWith('data:')) {
+        finalImage = newDish.img.trim();
+      } else {
+        // If it's a base64 data URL, we need to upload it
+        alert('Please wait for image upload to complete or use an image URL instead.');
+        return;
+      }
     } else if (editingRecipe && editingRecipe.img) {
       // Editing and no new image - keep existing
       finalImage = editingRecipe.img;
@@ -526,7 +668,18 @@ export default function CleanPlateCasino() {
         saveSuccessful = true;
       } catch (e) {
         console.error("Error saving recipe to Firebase:", e);
-        alert('Failed to save recipe. Please try again.');
+        let errorMessage = 'Failed to save recipe. Please try again.';
+        
+        // Provide more specific error messages
+        if (e.code === 'permission-denied') {
+          errorMessage = 'Permission denied. Please check Firestore rules are deployed correctly.';
+        } else if (e.code === 'unavailable') {
+          errorMessage = 'Firebase is unavailable. Please check your internet connection.';
+        } else if (e.message) {
+          errorMessage = `Error: ${e.message}`;
+        }
+        
+        alert(errorMessage);
         return;
       }
     } else {
