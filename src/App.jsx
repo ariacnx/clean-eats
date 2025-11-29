@@ -1644,7 +1644,7 @@ export default function CleanPlateCasino() {
         <div className={`bg-white p-8 sticky top-0 z-10 border-b border-stone-200 transition-transform duration-300 ${
           showFilters ? 'translate-y-0' : '-translate-y-full'
         }`}>
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center justify-between mb-4 md:mb-8">
             <div>
               <div className="flex items-center gap-4 mb-2">
                 <h2 className="text-3xl font-light text-stone-900 tracking-wider uppercase">Browse</h2>
