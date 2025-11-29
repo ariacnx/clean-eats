@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Copy, Check, Pencil } from 'lucide-react';
 import { isValidMenuId } from '../utils/menuId';
 
@@ -21,6 +21,14 @@ export const MenuJoinModal = ({
   const [linkCopied, setLinkCopied] = useState(false);
   const [isEditingSpaceName, setIsEditingSpaceName] = useState(false);
   const [editingSpaceName, setEditingSpaceName] = useState('');
+
+  // Reset edit state when modal closes or space changes
+  useEffect(() => {
+    if (!isOpen) {
+      setIsEditingSpaceName(false);
+      setEditingSpaceName('');
+    }
+  }, [isOpen, currentSpaceId]);
 
   if (!isOpen) return null;
 

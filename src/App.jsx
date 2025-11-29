@@ -65,7 +65,8 @@ import {
   createSpace, 
   joinSpace,
   getSpace,
-  updateSpaceName
+  updateSpaceName,
+  subscribeToSpace
 } from './services/spaceService';
 
 // Import config
@@ -261,6 +262,28 @@ export default function CleanPlateCasino() {
     // Set up real-time listener for current menu
     const unsubscribe = subscribeToCurrentMenu(db, spaceId, (recipeIds) => {
       setCurrentMenuIds(recipeIds);
+    });
+
+    return () => unsubscribe();
+  }, [isFirebaseReady, spaceId]);
+
+  // Subscribe to space changes to keep space name updated
+  useEffect(() => {
+    if (!isFirebaseReady || !spaceId || !db) {
+      setSpaceName('');
+      return;
+    }
+
+    // Set up real-time listener for space data (including name)
+    const unsubscribe = subscribeToSpace(db, spaceId, (space) => {
+      console.log('Space subscription update:', space);
+      if (space && space.name) {
+        console.log('Setting space name to:', space.name);
+        setSpaceName(space.name);
+      } else {
+        console.log('Space has no name, setting to empty');
+        setSpaceName('');
+      }
     });
 
     return () => unsubscribe();
