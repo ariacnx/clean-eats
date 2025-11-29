@@ -2,6 +2,7 @@
 import { 
   doc, 
   setDoc, 
+  updateDoc,
   getDoc,
   onSnapshot 
 } from 'firebase/firestore';
@@ -121,6 +122,23 @@ export const getSpace = async (db, spaceId) => {
     console.error("Error getting space:", e);
     return null;
   }
+};
+
+/**
+ * Update space name
+ * @param {Object} db - Firestore database instance
+ * @param {string} spaceId - Space ID
+ * @param {string} newName - New space name
+ * @returns {Promise<void>}
+ */
+export const updateSpaceName = async (db, spaceId, newName) => {
+  if (!db || !spaceId) throw new Error('Firestore or spaceId not initialized');
+  
+  const spaceRef = doc(db, `/artifacts/${appId}/spaces`, spaceId);
+  await updateDoc(spaceRef, {
+    name: newName,
+    updatedAt: Date.now()
+  });
 };
 
 /**

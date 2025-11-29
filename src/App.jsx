@@ -64,7 +64,8 @@ import {
   setCurrentSpaceId, 
   createSpace, 
   joinSpace,
-  getSpace
+  getSpace,
+  updateSpaceName
 } from './services/spaceService';
 
 // Import config
@@ -225,7 +226,7 @@ export default function CleanPlateCasino() {
             setSpaceName('');
           }
         })();
-      } else {
+        } else {
         // Show space selector if no space is selected
         setShowSpaceSelector(true);
       }
@@ -742,6 +743,16 @@ export default function CleanPlateCasino() {
       return;
     }
 
+    // Format dish name to title case (first letter of each word uppercase)
+    const formatDishName = (name) => {
+      return name.trim()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+    };
+    
+    const formattedDishName = formatDishName(newDish.name);
+
     // Determine image: upload new image to Storage, or use existing, or generate with Gemini
     let finalImage = '';
     let imagePrompt = null;
@@ -766,9 +777,9 @@ export default function CleanPlateCasino() {
     } else {
       // No image uploaded or image was removed - generate with Gemini
       // Use placeholder temporarily until Gemini generates the image
-      finalImage = `https://placehold.co/800x600/d97706/ffffff?text=${newDish.name.trim().split(' ').map(n=>n[0]).join('')}`;
+      finalImage = `https://placehold.co/800x600/d97706/ffffff?text=${formattedDishName.split(' ').map(n=>n[0]).join('')}`;
       // Generate prompt for Gemini image generation
-      imagePrompt = getDishImagePrompt(newDish.name.trim());
+      imagePrompt = getDishImagePrompt(formattedDishName);
     }
 
     // Debug: Log the newDish state before creating dish object
@@ -776,7 +787,7 @@ export default function CleanPlateCasino() {
     console.log('newDish.cuisine value:', newDish.cuisine);
     
     const dish = {
-      name: newDish.name.trim(),
+      name: formattedDishName,
       cuisine: newDish.cuisine, // Use the selected cuisine from the form
       protein: newDish.protein,
       cals: parseInt(newDish.cals) || 0,
@@ -1607,6 +1618,7 @@ export default function CleanPlateCasino() {
           onClose={() => setShowSpaceSelector(false)}
           onCreateSpace={handleCreateSpace}
           onJoinSpace={handleJoinSpace}
+          onUpdateSpaceName={handleUpdateSpaceName}
           currentSpaceId={spaceId}
           currentSpaceName={spaceName}
         />
@@ -1808,6 +1820,7 @@ export default function CleanPlateCasino() {
           onClose={() => setShowSpaceSelector(false)}
           onCreateSpace={handleCreateSpace}
           onJoinSpace={handleJoinSpace}
+          onUpdateSpaceName={handleUpdateSpaceName}
           currentSpaceId={spaceId}
           currentSpaceName={spaceName}
         />
@@ -1824,12 +1837,13 @@ export default function CleanPlateCasino() {
     }
     
     try {
-      // Format display name as UPPERCASE with hyphens
+      // Format display name as UPPERCASE with hyphens and ampersands
       const raw = (name && name.trim()) || 'My Space';
       let displayName = raw
         .toUpperCase()
-        .replace(/[^A-Z0-9]+/g, '-')   // non-alphanumeric -> hyphen
-        .replace(/^-+|-+$/g, '')       // trim leading/trailing hyphens
+        .replace(/[^A-Z0-9&-]+/g, '-')   // non-alphanumeric (except & and -) -> hyphen
+        .replace(/^-+|-+$/g, '')         // trim leading/trailing hyphens
+        .replace(/^&+|&+$/g, '')        // trim leading/trailing ampersands
         .slice(0, 24);
       if (!displayName) {
         displayName = 'MY-SPACE';
@@ -1870,6 +1884,33 @@ export default function CleanPlateCasino() {
       } catch (fallbackError) {
         console.error('Local fallback failed:', fallbackError);
       }
+    }
+  };
+
+  const handleUpdateSpaceName = async (newName) => {
+    if (!db || !spaceId) {
+      alert('Firebase not initialized. Please refresh the page.');
+      return;
+    }
+    
+    try {
+      // Format display name as UPPERCASE with hyphens and ampersands
+      const raw = (newName && newName.trim()) || 'My Space';
+      let displayName = raw
+        .toUpperCase()
+        .replace(/[^A-Z0-9&-]+/g, '-')   // non-alphanumeric (except & and -) -> hyphen
+        .replace(/^-+|-+$/g, '')         // trim leading/trailing hyphens
+        .replace(/^&+|&+$/g, '')        // trim leading/trailing ampersands
+        .slice(0, 24);
+      if (!displayName) {
+        displayName = 'MY-SPACE';
+      }
+
+      await updateSpaceName(db, spaceId, displayName);
+      setSpaceName(displayName);
+    } catch (e) {
+      console.error("Error updating space name:", e);
+      alert('Failed to update space name. Please try again.');
     }
   };
 
@@ -1945,6 +1986,7 @@ export default function CleanPlateCasino() {
         }}
         onCreateSpace={handleCreateSpace}
         onJoinSpace={handleJoinSpace}
+        onUpdateSpaceName={handleUpdateSpaceName}
         currentSpaceId={spaceId}
       />
     );

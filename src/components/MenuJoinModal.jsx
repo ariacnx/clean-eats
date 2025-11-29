@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Copy, Check } from 'lucide-react';
+import { X, Copy, Check, Pencil } from 'lucide-react';
 import { isValidMenuId } from '../utils/menuId';
 
 /**
@@ -11,6 +11,7 @@ export const MenuJoinModal = ({
   onClose,
   onCreateSpace,
   onJoinSpace,
+  onUpdateSpaceName,
   currentSpaceId,
   currentSpaceName
 }) => {
@@ -18,6 +19,8 @@ export const MenuJoinModal = ({
   const [newSpaceName, setNewSpaceName] = useState('');
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [isEditingSpaceName, setIsEditingSpaceName] = useState(false);
+  const [editingSpaceName, setEditingSpaceName] = useState('');
 
   if (!isOpen) return null;
 
@@ -74,6 +77,24 @@ export const MenuJoinModal = ({
     }
   };
 
+  const handleStartEditSpaceName = () => {
+    setEditingSpaceName(currentSpaceName || '');
+    setIsEditingSpaceName(true);
+  };
+
+  const handleSaveSpaceName = () => {
+    if (onUpdateSpaceName && editingSpaceName.trim()) {
+      onUpdateSpaceName(editingSpaceName.trim());
+    }
+    setIsEditingSpaceName(false);
+    setEditingSpaceName('');
+  };
+
+  const handleCancelEditSpaceName = () => {
+    setIsEditingSpaceName(false);
+    setEditingSpaceName('');
+  };
+
   return (
     <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
       <div className="max-w-md w-full mx-auto px-4 py-12 pb-32">
@@ -93,15 +114,53 @@ export const MenuJoinModal = ({
           </h3>
           {currentSpaceId && (
             <div className="mt-4">
-              {currentSpaceName && (
-                <>
-                  <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">
-                    SPACE NAME
+              <p className="text-xs text-stone-500 uppercase tracking-widest mb-1">
+                SPACE NAME
+              </p>
+              {isEditingSpaceName ? (
+                <div className="flex items-center gap-2 mb-4">
+                  <input
+                    type="text"
+                    value={editingSpaceName}
+                    onChange={(e) => setEditingSpaceName(e.target.value.slice(0, 32))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleSaveSpaceName();
+                      } else if (e.key === 'Escape') {
+                        handleCancelEditSpaceName();
+                      }
+                    }}
+                    className="flex-1 text-sm text-stone-900 tracking-wide border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSaveSpaceName}
+                    className="text-stone-600 hover:text-stone-900 text-xs uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={handleCancelEditSpaceName}
+                    className="text-stone-400 hover:text-stone-900 transition-colors p-1"
+                  >
+                    <X size={16} strokeWidth={1.5} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center gap-2 mb-4">
+                  <p className="text-sm text-stone-900 tracking-wide">
+                    {currentSpaceName || 'Unnamed Space'}
                   </p>
-                  <p className="text-sm text-stone-900 tracking-wide mb-4">
-                    {currentSpaceName}
-                  </p>
-                </>
+                  {onUpdateSpaceName && (
+                    <button
+                      onClick={handleStartEditSpaceName}
+                      className="text-stone-400 hover:text-stone-900 transition-colors p-1"
+                      title="Edit space name"
+                    >
+                      <Pencil size={14} strokeWidth={1.5} />
+                    </button>
+                  )}
+                </div>
               )}
               <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">SPACE CODE</p>
               <div className="flex items-center justify-center gap-3">
