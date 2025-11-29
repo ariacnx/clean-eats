@@ -22,3 +22,11 @@ export const DEFAULT_RECIPES = [
   { id: 13, name: "Tofu Vegetable Curry", cuisine: "Asian", protein: "Vegetarian", cals: 360, time: "30m", img: "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&q=80&w=800" },
 ];
 
+// Inspiration recipes - 4 default dishes to copy to new spaces
+export const INSPIRATION_RECIPES = [
+  DEFAULT_RECIPES[0],  // Lemon Herb Grilled Chicken (Chicken, Mediterranean)
+  DEFAULT_RECIPES[7],  // Miso Glazed Salmon (Fish, Asian)
+  DEFAULT_RECIPES[11], // Greek Chickpea Salad (Vegetarian, Mediterranean)
+  DEFAULT_RECIPES[4],  // Steak & Asparagus Stir-Fry (Beef, Asian)
+];
+

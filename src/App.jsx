@@ -35,7 +35,7 @@ import {
 } from 'firebase/firestore';
 
 // Import constants
-import { DEFAULT_RECIPES, CUISINES, PROTEINS, HEALTH_TAGS } from './constants';
+import { DEFAULT_RECIPES, INSPIRATION_RECIPES, CUISINES, PROTEINS, HEALTH_TAGS } from './constants';
 
 // Import utilities
 import { getHealthTag } from './utils/healthTag';
@@ -469,6 +469,12 @@ export default function CleanPlateCasino() {
       return;
     }
 
+    // Check if space is selected
+    if (!spaceId) {
+      alert('Please create or join a space first before adding dishes.');
+      return;
+    }
+
     // Determine image: prioritize imagePreview (new upload), then newDish.img (URL or existing), then placeholder
     let finalImage = '';
     if (imagePreview) {
@@ -499,11 +505,14 @@ export default function CleanPlateCasino() {
       createdBy: editingRecipe?.createdBy || spaceId || 'anonymous'
     };
 
+    let saveSuccessful = false;
+
     // If editing, update existing recipe
     if (editingRecipe && isFirebaseRecipeId(editingRecipe.id) && isFirebaseReady && db && spaceId) {
       try {
         await updateRecipe(db, spaceId, editingRecipe.id, dish);
         // Recipe will be updated automatically via the real-time listener
+        saveSuccessful = true;
       } catch (e) {
         console.error("Error updating recipe in Firebase:", e);
         alert('Failed to update recipe. Please try again.');
@@ -514,42 +523,36 @@ export default function CleanPlateCasino() {
       try {
         await addRecipe(db, spaceId, dish);
         // Recipe will be added automatically via the real-time listener
+        saveSuccessful = true;
       } catch (e) {
         console.error("Error saving recipe to Firebase:", e);
         alert('Failed to save recipe. Please try again.');
         return;
       }
     } else {
-      // Fallback to local storage if Firebase not available
-      if (editingRecipe) {
-        // Update local recipe
-        setRecipes(prevRecipes => prevRecipes.map(r => {
-          const rId = r.id || r.name;
-          const editId = editingRecipe.id || editingRecipe.name;
-          return rId === editId ? { ...r, ...dish } : r;
-        }));
-      } else {
-        // Add new local recipe
-        const maxId = recipes.length > 0 ? Math.max(...recipes.map(r => r.id || 0)) : 0;
-        const dishWithId = { ...dish, id: maxId + 1 };
-        setRecipes([...recipes, dishWithId]);
-      }
+      // Firebase not available - show error
+      alert('Firebase is not available. Please check your connection and try again.');
+      return;
     }
 
-    setNewDish({
-      name: '',
-      cuisine: 'Mediterranean',
-      protein: 'Chicken',
-      cals: '',
-      time: '',
-      img: '',
-      healthTag: 'Healthy',
-      freeformTag: ''
-    });
-    setImageFile(null);
-    setImagePreview(null);
-    setEditingRecipe(null);
-    setShowAddForm(false);
+    // Only close modal and reset form if save was successful
+    if (saveSuccessful) {
+      // Reset form and close modal
+      setNewDish({
+        name: '',
+        cuisine: 'Mediterranean',
+        protein: 'Chicken',
+        cals: '',
+        time: '',
+        img: '',
+        healthTag: 'Healthy',
+        freeformTag: ''
+      });
+      setImageFile(null);
+      setImagePreview(null);
+      setEditingRecipe(null);
+      setShowAddForm(false);
+    }
   };
 
   // Delete dish from space recipes
@@ -1294,12 +1297,12 @@ export default function CleanPlateCasino() {
       setSpaceId(newSpaceId);
       setSpaceName(displayName);
       
-      // Copy default recipes to the new space
+      // Copy 4 inspiration recipes to the new space
       try {
-        await copyDefaultRecipesToSpace(db, newSpaceId, DEFAULT_RECIPES);
+        await copyDefaultRecipesToSpace(db, newSpaceId, INSPIRATION_RECIPES);
       } catch (e) {
-        console.error("Error copying default recipes to space:", e);
-        // Continue anyway - recipes will be loaded from defaults if copy fails
+        console.error("Error copying inspiration recipes to space:", e);
+        // Continue anyway - space will be empty if copy fails
       }
       
       setShowSpaceSelector(false);
