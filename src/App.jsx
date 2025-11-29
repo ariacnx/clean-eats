@@ -46,6 +46,7 @@ import { DEFAULT_RECIPES, INSPIRATION_RECIPES, CUISINES, PROTEINS, HEALTH_TAGS }
 // Import utilities
 import { getHealthTag } from './utils/healthTag';
 import { loadRecipes, loadUserData, loadSavedMenus, saveSavedMenus } from './utils/localStorage';
+import { getDishImagePrompt } from './utils/aiPrompts';
 
 // Import services
 import { subscribeToRecipes, addRecipe, updateRecipe, deleteRecipe, isFirebaseRecipeId, copyDefaultRecipesToSpace } from './services/recipeService';
@@ -599,8 +600,9 @@ export default function CleanPlateCasino() {
       return;
     }
 
-    // Determine image: upload new image to Storage, or use existing URL, or placeholder
+    // Determine image: upload new image to Storage, or use existing URL, or generate with Gemini
     let finalImage = '';
+    let imagePrompt = null;
     
     if (imageFile) {
       if (storage && spaceId) {
@@ -629,8 +631,10 @@ export default function CleanPlateCasino() {
       // Editing and no new image - keep existing
       finalImage = editingRecipe.img;
     } else {
-      // No image - use placeholder
+      // No image - use placeholder temporarily, will be replaced by Gemini-generated image
       finalImage = `https://placehold.co/800x600/d97706/ffffff?text=${newDish.name.trim().split(' ').map(n=>n[0]).join('')}`;
+      // Generate prompt for Gemini image generation
+      imagePrompt = getDishImagePrompt(newDish.name.trim());
     }
 
     const dish = {
@@ -644,7 +648,9 @@ export default function CleanPlateCasino() {
       freeformTag: newDish.freeformTag.trim() || '',
       notes: editingRecipe?.notes || '',
       createdAt: editingRecipe?.createdAt || Date.now(),
-      createdBy: editingRecipe?.createdBy || spaceId || 'anonymous'
+      createdBy: editingRecipe?.createdBy || spaceId || 'anonymous',
+      // Add imagePrompt if no image was uploaded (for Gemini generation)
+      imagePrompt: imagePrompt || editingRecipe?.imagePrompt || null
     };
 
     let saveSuccessful = false;
