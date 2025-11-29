@@ -1950,6 +1950,11 @@ export default function CleanPlateCasino() {
 
   // --- RENDER: TAB NAVIGATION ---
   const renderTabs = () => {
+    // Hide navigation bar when edit modal is open (especially on mobile)
+    if (showAddForm) {
+      return null;
+    }
+
     const tabs = [
       { id: 'spin', label: 'Spin', icon: RefreshCw },
       { id: 'browse', label: 'Browse', icon: BookOpen },
@@ -1967,17 +1972,22 @@ export default function CleanPlateCasino() {
               <button
                 key={tab.id}
                 onClick={() => {
+                  // Prevent tab switching when edit modal is open
+                  if (showAddForm) {
+                    return;
+                  }
                   if (tab.id === 'space') {
                     setShowSpaceSelector(true);
                     return;
                   }
                   setView(tab.id);
                 }}
+                disabled={showAddForm}
                 className={`flex flex-col items-center justify-center gap-1 px-4 py-2 transition-all relative ${
                   isActive 
                     ? 'text-stone-900' 
                     : 'text-stone-400 hover:text-stone-600'
-                }`}
+                } ${showAddForm ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <div className="relative">
                   <Icon size={20} strokeWidth={isActive ? 2 : 1.5} />
