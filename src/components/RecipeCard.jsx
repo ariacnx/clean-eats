@@ -73,22 +73,41 @@ export const RecipeCard = ({
         
         {/* Details - Minimalist - Only show tags that exist */}
         {(() => {
-          const tags = [];
-          if (recipe.cuisine) tags.push(recipe.cuisine);
-          if (recipe.protein) tags.push(recipe.protein);
-          if (recipe.healthTag) tags.push(recipe.healthTag);
+          // Mobile: only cuisine and healthTag
+          const mobileTags = [];
+          if (recipe.cuisine) mobileTags.push(recipe.cuisine);
+          if (recipe.healthTag) mobileTags.push(recipe.healthTag);
           
-          if (tags.length === 0) return null;
+          // Desktop: all tags (cuisine, protein, healthTag)
+          const desktopTags = [];
+          if (recipe.cuisine) desktopTags.push(recipe.cuisine);
+          if (recipe.protein) desktopTags.push(recipe.protein);
+          if (recipe.healthTag) desktopTags.push(recipe.healthTag);
+          
+          if (mobileTags.length === 0 && desktopTags.length === 0) return null;
           
           return (
-            <div className="flex items-center gap-3 text-xs text-stone-500 uppercase tracking-wider mt-auto">
-              {tags.map((tag, index) => (
-                <React.Fragment key={index}>
-                  {index > 0 && <span className="text-stone-300">•</span>}
-                  <span>{tag}</span>
-                </React.Fragment>
-              ))}
-            </div>
+            <>
+              {/* Mobile: Show only cuisine and healthTag with smaller text */}
+              <div className="flex items-center gap-2 text-[10px] text-stone-500 uppercase tracking-wider mt-auto md:hidden">
+                {mobileTags.map((tag, index) => (
+                  <React.Fragment key={`mobile-${index}`}>
+                    {index > 0 && <span className="text-stone-300">•</span>}
+                    <span>{tag}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+              
+              {/* Desktop: Show all tags (cuisine, protein, healthTag) with normal text */}
+              <div className="hidden md:flex items-center gap-3 text-xs text-stone-500 uppercase tracking-wider mt-auto">
+                {desktopTags.map((tag, index) => (
+                  <React.Fragment key={`desktop-${index}`}>
+                    {index > 0 && <span className="text-stone-300">•</span>}
+                    <span>{tag}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+            </>
           );
         })()}
       </div>
