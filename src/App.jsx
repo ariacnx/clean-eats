@@ -42,7 +42,7 @@ import { getHealthTag } from './utils/healthTag';
 import { loadRecipes, loadUserData, loadSavedMenus, saveSavedMenus } from './utils/localStorage';
 
 // Import services
-import { subscribeToRecipes, addRecipe, updateRecipe, deleteRecipe, isFirebaseRecipeId } from './services/recipeService';
+import { subscribeToRecipes, addRecipe, updateRecipe, deleteRecipe, isFirebaseRecipeId, copyDefaultRecipesToSpace } from './services/recipeService';
 import { 
   subscribeToMenus, 
   saveCurrentMenu, 
@@ -209,33 +209,22 @@ export default function CleanPlateCasino() {
     }
   }, []);
 
-  // Load shared recipes from Firebase (public, everyone can see/edit)
+  // Load recipes from Firebase for the current space
   useEffect(() => {
-    if (!isFirebaseReady || !db) return;
-
-    const sharedRecipesRef = collection(db, `/artifacts/${appId}/sharedRecipes`);
-    
-    // Set up real-time listener for shared recipes
-    const unsubscribe = onSnapshot(sharedRecipesRef, (snapshot) => {
-      const sharedRecipes = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      // Merge shared recipes with default recipes (avoid duplicates by name)
-      const defaultNames = new Set(DEFAULT_RECIPES.map(r => r.name));
-      const uniqueShared = sharedRecipes.filter(r => !defaultNames.has(r.name));
-      const allRecipes = [...DEFAULT_RECIPES, ...uniqueShared];
-      
-      setRecipes(allRecipes);
-    }, (error) => {
-      console.error("Error listening to shared recipes:", error);
-      // Fallback to default recipes if Firebase fails
+    if (!isFirebaseReady || !db || !spaceId) {
+      // If no space, show default recipes
       setRecipes(DEFAULT_RECIPES);
+      return;
+    }
+
+    // Set up real-time listener for space recipes
+    const unsubscribe = subscribeToRecipes(db, spaceId, (spaceRecipes) => {
+      // Use the recipes from the space (empty array if no recipes)
+      setRecipes(spaceRecipes || []);
     });
 
     return () => unsubscribe();
-  }, [isFirebaseReady, appId]);
+  }, [isFirebaseReady, spaceId]);
 
   // Load and sync current menu for space
   useEffect(() => {
@@ -511,19 +500,19 @@ export default function CleanPlateCasino() {
     };
 
     // If editing, update existing recipe
-    if (editingRecipe && isFirebaseRecipeId(editingRecipe.id) && isFirebaseReady && db) {
+    if (editingRecipe && isFirebaseRecipeId(editingRecipe.id) && isFirebaseReady && db && spaceId) {
       try {
-        await updateRecipe(db, editingRecipe.id, dish);
+        await updateRecipe(db, spaceId, editingRecipe.id, dish);
         // Recipe will be updated automatically via the real-time listener
       } catch (e) {
         console.error("Error updating recipe in Firebase:", e);
         alert('Failed to update recipe. Please try again.');
         return;
       }
-    } else if (isFirebaseReady && db) {
-      // Save new recipe to Firebase shared recipes collection
+    } else if (isFirebaseReady && db && spaceId) {
+      // Save new recipe to space's recipes collection
       try {
-        await addRecipe(db, dish);
+        await addRecipe(db, spaceId, dish);
         // Recipe will be added automatically via the real-time listener
       } catch (e) {
         console.error("Error saving recipe to Firebase:", e);
@@ -563,17 +552,16 @@ export default function CleanPlateCasino() {
     setShowAddForm(false);
   };
 
-  // Delete dish from shared recipes
+  // Delete dish from space recipes
   const handleDeleteDish = async (recipe) => {
-    if (window.confirm('Are you sure you want to delete this dish? Everyone will lose access to it.')) {
+    if (window.confirm('Are you sure you want to delete this dish from your space?')) {
       const recipeId = recipe.id || recipe.name;
       
-      // If it's a shared recipe (has Firebase doc ID - typically 20 chars), delete from Firebase
+      // If it's a Firebase recipe (has Firebase doc ID - typically 20 chars), delete from Firebase
       // Firebase IDs are alphanumeric strings, typically 20 characters long
-      if (recipe.id && typeof recipe.id === 'string' && recipe.id.length >= 20 && !recipe.id.startsWith('local_') && isFirebaseReady && db) {
+      if (recipe.id && typeof recipe.id === 'string' && recipe.id.length >= 20 && !recipe.id.startsWith('local_') && isFirebaseReady && db && spaceId) {
         try {
-          const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, recipe.id);
-          await deleteDoc(recipeDocRef);
+          await deleteRecipe(db, spaceId, recipe.id);
           // Recipe will be removed automatically via the real-time listener
         } catch (e) {
           console.error("Error deleting recipe from Firebase:", e);
@@ -581,7 +569,7 @@ export default function CleanPlateCasino() {
           return;
         }
       } else {
-        // Default recipe or local-only recipe - remove from local state by ID
+        // Local-only recipe - remove from local state by ID
         setRecipes(prevRecipes => {
           return prevRecipes.filter(r => {
             const rId = r.id || r.name;
@@ -767,15 +755,10 @@ export default function CleanPlateCasino() {
     const recipeId = viewingRecipe.id || viewingRecipe.name;
     
     // If it's a Firebase recipe, save notes to Firebase
-    if (viewingRecipe.id && typeof viewingRecipe.id === 'string' && viewingRecipe.id.length >= 20 && !viewingRecipe.id.startsWith('local_')) {
+    if (viewingRecipe.id && typeof viewingRecipe.id === 'string' && viewingRecipe.id.length >= 20 && !viewingRecipe.id.startsWith('local_') && spaceId) {
       try {
-        const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, viewingRecipe.id);
-        await updateDoc(recipeDocRef, { notes: recipeNote });
-        // Update local state
-        setRecipes(prevRecipes => prevRecipes.map(r => {
-          const rId = r.id || r.name;
-          return rId === recipeId ? { ...r, notes: recipeNote } : r;
-        }));
+        await updateRecipe(db, spaceId, viewingRecipe.id, { notes: recipeNote });
+        // Recipe will be updated automatically via the real-time listener
         alert('Notes saved!');
       } catch (e) {
         console.error("Error saving notes:", e);
@@ -1310,6 +1293,15 @@ export default function CleanPlateCasino() {
       const newSpaceId = await createSpace(db, displayName);
       setSpaceId(newSpaceId);
       setSpaceName(displayName);
+      
+      // Copy default recipes to the new space
+      try {
+        await copyDefaultRecipesToSpace(db, newSpaceId, DEFAULT_RECIPES);
+      } catch (e) {
+        console.error("Error copying default recipes to space:", e);
+        // Continue anyway - recipes will be loaded from defaults if copy fails
+      }
+      
       setShowSpaceSelector(false);
     } catch (e) {
       console.error("Error creating space:", e);

@@ -32,6 +32,12 @@ service cloud.firestore {
         allow read: if true;
         allow write: if true;
       }
+      
+      // Space recipes
+      match /recipes/{recipeId} {
+        allow read: if true;
+        allow write: if true;
+      }
     }
 
     // Deny all other access
