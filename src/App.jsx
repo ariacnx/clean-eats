@@ -150,7 +150,7 @@ export default function CleanPlateCasino() {
   // Menu editing state
   const [editingMenuId, setEditingMenuId] = useState(null);
   const [editingMenuName, setEditingMenuName] = useState('');
-  const [showCalories, setShowCalories] = useState(true);
+  const [showCalories, setShowCalories] = useState(false);
 
   // Recipes are now shared via Firebase, no need to save to localStorage
   // (localStorage was for user-specific recipes, but now recipes are public/shared)
@@ -1592,12 +1592,12 @@ export default function CleanPlateCasino() {
           onToggleCalories={() => setShowCalories(!showCalories)}
           onClose={() => {
             setViewingMenu(null);
-            setShowCalories(true);
+            setShowCalories(false);
           }}
           onLoadMenu={(recipeIds) => {
             loadMenu(recipeIds);
             setViewingMenu(null);
-            setShowCalories(true);
+            setShowCalories(false);
           }}
         />
         
@@ -1672,7 +1672,8 @@ export default function CleanPlateCasino() {
               </select>
             </div>
             
-            <div>
+            {/* Protein filter - hidden on mobile, visible on desktop */}
+            <div className="hidden md:block">
               <select 
                 value={lockProtein === "All" ? "" : lockProtein} 
                 onChange={(e) => setLockProtein(e.target.value || "All")}
@@ -1694,7 +1695,8 @@ export default function CleanPlateCasino() {
               </select>
             </div>
             
-            <div>
+            {/* Freeform tag filter - hidden on mobile, visible on desktop */}
+            <div className="hidden md:block">
               <select 
                 value={lockFreeformTag === "All" ? "" : lockFreeformTag} 
                 onChange={(e) => setLockFreeformTag(e.target.value || "All")}

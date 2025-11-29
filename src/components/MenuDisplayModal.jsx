@@ -67,13 +67,17 @@ export const MenuDisplayModal = ({
                     <h3 className="text-2xl font-light text-stone-900 mb-2 tracking-wide">
                       {recipe.name}
                     </h3>
-                    <div className="flex items-center gap-4 text-xs text-stone-500 uppercase tracking-wider mt-3">
-                      <span>{recipe.cuisine}</span>
-                      <span className="text-stone-300">•</span>
-                      <span>{recipe.protein}</span>
-                      <span className="text-stone-300">•</span>
-                      <span>{recipe.time}</span>
-                    </div>
+                    {recipe.cuisine || recipe.protein ? (
+                      <div className="flex items-center gap-4 text-xs text-stone-500 uppercase tracking-wider mt-3">
+                        {recipe.cuisine && (
+                          <>
+                            <span>{recipe.cuisine}</span>
+                            {recipe.protein && <span className="text-stone-300">•</span>}
+                          </>
+                        )}
+                        {recipe.protein && <span>{recipe.protein}</span>}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 
