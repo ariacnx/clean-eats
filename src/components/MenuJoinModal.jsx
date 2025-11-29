@@ -17,8 +17,15 @@ export const MenuJoinModal = ({
   const [joinCode, setJoinCode] = useState('');
   const [newSpaceName, setNewSpaceName] = useState('');
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   if (!isOpen) return null;
+
+  const getShareableLink = () => {
+    if (!currentSpaceId) return '';
+    const baseUrl = window.location.origin + window.location.pathname;
+    return `${baseUrl}?space=${currentSpaceId}`;
+  };
 
   const handleCopySpaceId = () => {
     if (currentSpaceId) {
@@ -28,18 +35,42 @@ export const MenuJoinModal = ({
     }
   };
 
+  const handleCopyLink = () => {
+    const link = getShareableLink();
+    if (link) {
+      navigator.clipboard.writeText(link);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    }
+  };
+
   const handleCreate = () => {
     onCreateSpace(newSpaceName.trim() || 'MY-SPACE');
     setNewSpaceName('');
   };
 
   const handleJoin = () => {
-    const code = joinCode.trim().toLowerCase();
+    let code = joinCode.trim().toLowerCase();
+    
+    // If it's a URL, extract the space ID from the query parameter
+    try {
+      const url = new URL(code);
+      const spaceParam = url.searchParams.get('space');
+      if (spaceParam) {
+        code = spaceParam.toLowerCase();
+      }
+    } catch (e) {
+      // Not a URL, treat as space code
+    }
+    
+    // Clean the code (remove any non-alphanumeric characters)
+    code = code.replace(/[^a-z0-9]/g, '');
+    
     if (isValidMenuId(code)) {
       onJoinSpace(code);
       setJoinCode('');
     } else {
-      alert('Invalid space code. Please enter a 6-character code (e.g., abc123)');
+      alert('Invalid space code. Please enter a 6-character code (e.g., abc123) or paste a shareable link.');
     }
   };
 
@@ -89,9 +120,33 @@ export const MenuJoinModal = ({
                   )}
                 </button>
               </div>
-              <p className="text-xs text-stone-400 mt-3">
+              <p className="text-xs text-stone-400 mt-3 mb-4">
                 Share this code with others to collaborate
               </p>
+              
+              {/* Shareable Link */}
+              <div className="mt-6 pt-6 border-t border-stone-200">
+                <p className="text-xs text-stone-500 uppercase tracking-widest mb-2">SHAREABLE LINK</p>
+                <div className="flex items-center justify-center gap-3">
+                  <code className="text-xs font-mono text-stone-600 tracking-wide bg-stone-50 px-3 py-2 border border-stone-200 break-all flex-1 text-center">
+                    {getShareableLink()}
+                  </code>
+                  <button
+                    onClick={handleCopyLink}
+                    className="text-stone-400 hover:text-stone-900 transition-colors p-2 flex-shrink-0"
+                    title="Copy shareable link"
+                  >
+                    {linkCopied ? (
+                      <Check size={18} className="text-stone-900" />
+                    ) : (
+                      <Copy size={18} />
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-stone-400 mt-3">
+                  Share this link to let others join your space
+                </p>
+              </div>
             </div>
           )}
         </div>
@@ -136,16 +191,29 @@ export const MenuJoinModal = ({
               <div className="space-y-4">
                 <input
                   type="text"
-                  placeholder="Enter space code (e.g., abc123)"
+                  placeholder="Enter space code or paste link"
                   value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6))}
+                  onChange={(e) => {
+                    let value = e.target.value;
+                    // If it's a URL, extract the space ID from the query parameter
+                    try {
+                      const url = new URL(value);
+                      const spaceParam = url.searchParams.get('space');
+                      if (spaceParam) {
+                        value = spaceParam;
+                      }
+                    } catch (e) {
+                      // Not a URL, treat as space code
+                    }
+                    setJoinCode(value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6));
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       handleJoin();
                     }
                   }}
                   className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent text-sm font-mono tracking-wider text-center"
-                  maxLength={6}
+                  maxLength={200}
                 />
                 <button
                   onClick={handleJoin}

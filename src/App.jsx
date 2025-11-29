@@ -193,22 +193,39 @@ export default function CleanPlateCasino() {
       setIsFirebaseReady(true);
       clearTimeout(timeoutId);
       
+      // Check for space parameter in URL (e.g., ?space=abc123)
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlSpaceId = urlParams.get('space');
+      
       // Load current space ID from localStorage
       const savedSpaceId = getCurrentSpaceId();
-      if (savedSpaceId) {
-        setSpaceId(savedSpaceId);
+      
+      // Priority: URL parameter > localStorage
+      const spaceIdToUse = urlSpaceId || savedSpaceId;
+      
+      if (spaceIdToUse) {
+        // If space ID came from URL, clean up the URL
+        if (urlSpaceId) {
+          const newUrl = window.location.pathname;
+          window.history.replaceState({}, '', newUrl);
+        }
+        
+        setSpaceId(spaceIdToUse);
         // Load space metadata (name) for convenience
         (async () => {
           try {
-            const space = await getSpace(db, savedSpaceId);
+            const space = await getSpace(db, spaceIdToUse);
             if (space && space.name) {
               setSpaceName(space.name);
+            } else {
+              setSpaceName('');
             }
           } catch (e) {
             console.error('Error loading space name:', e);
+            setSpaceName('');
           }
         })();
-        } else {
+      } else {
         // Show space selector if no space is selected
         setShowSpaceSelector(true);
       }
