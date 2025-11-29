@@ -89,7 +89,7 @@ export default function CleanPlateCasino() {
   const userData = loadUserData();
 
   const [recipes, setRecipes] = useState(() => loadRecipes(DEFAULT_RECIPES)); // Start with defaults, Firebase will load shared recipes
-  const [view, setView] = useState('spin'); // 'spin', 'browse', or 'menus'
+  const [view, setView] = useState('browse'); // 'spin', 'browse', or 'menus'
   const [currentMenuIds, setCurrentMenuIds] = useState(userData.currentMenu); // Current working menu
   const [savedMenus, setSavedMenus] = useState([]); // Saved Menus (formerly templates)
   
@@ -123,7 +123,7 @@ export default function CleanPlateCasino() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newDish, setNewDish] = useState({
     name: '',
-    cuisine: 'Mediterranean',
+    cuisine: 'Japanese', // Default to first available cuisine option
     protein: 'Chicken',
     cals: '',
     time: '',
@@ -133,6 +133,7 @@ export default function CleanPlateCasino() {
   });
   const [imagePreview, setImagePreview] = useState(null);
   const [imageFile, setImageFile] = useState(null);
+  const [imageRemoved, setImageRemoved] = useState(false); // Track if user removed existing image during edit
 
   // Menu selector modal state
   const [showMenuSelector, setShowMenuSelector] = useState(false);
@@ -207,7 +208,7 @@ export default function CleanPlateCasino() {
             console.error('Error loading space name:', e);
           }
         })();
-      } else {
+        } else {
         // Show space selector if no space is selected
         setShowSpaceSelector(true);
       }
@@ -265,6 +266,17 @@ export default function CleanPlateCasino() {
     return () => clearTimeout(timeoutId);
   }, [isFirebaseReady, spaceId, currentMenuIds]);
 
+  // Get today's date string in YYYY-MM-DD format
+  const getTodayDateString = () => {
+    const today = new Date();
+    return today.toISOString().split('T')[0]; // Returns "YYYY-MM-DD"
+  };
+
+  // Get or create "Today's Menu" ID
+  const getTodaysMenuId = () => {
+    return `today_${getTodayDateString()}`;
+  };
+
   // Load saved menus from localStorage on mount
   useEffect(() => {
     const localMenus = loadSavedMenus();
@@ -280,6 +292,26 @@ export default function CleanPlateCasino() {
 
     // Use service to subscribe to menus
     const unsubscribe = subscribeToMenus(db, spaceId, (loadedMenus) => {
+      // Ensure Today's Menu exists (do this synchronously to avoid race conditions)
+      const todaysMenuId = getTodaysMenuId();
+      const todaysMenuExists = loadedMenus.some(m => m.id === todaysMenuId);
+      
+      if (!todaysMenuExists) {
+        // Create Today's Menu if it doesn't exist (async, but don't wait)
+        const menuRef = doc(db, `/artifacts/${appId}/spaces/${spaceId}/menus`, todaysMenuId);
+        setDoc(menuRef, {
+          name: "Today's Menu",
+          recipeIds: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          isTodaysMenu: true,
+          date: getTodayDateString()
+        }).catch((e) => {
+          console.error("Error creating Today's Menu:", e);
+        });
+        // The listener will pick up the new menu automatically
+      }
+      
       setSavedMenus(loadedMenus);
       // Also sync to localStorage as backup
       saveSavedMenus(loadedMenus);
@@ -287,6 +319,62 @@ export default function CleanPlateCasino() {
 
     return () => unsubscribe();
   }, [isFirebaseReady, spaceId]);
+
+  // Auto-save Today's Menu as dated menu at 11:59 PM
+  useEffect(() => {
+    if (!isFirebaseReady || !spaceId || !db) return;
+
+    const archiveTodaysMenu = async () => {
+      const todaysMenuId = getTodaysMenuId();
+      const menuRef = doc(db, `/artifacts/${appId}/spaces/${spaceId}/menus`, todaysMenuId);
+      const menuDoc = await getDoc(menuRef);
+
+      if (menuDoc.exists()) {
+        const menuData = menuDoc.data();
+        // Archive even if empty (to preserve the date)
+        const dateString = getTodayDateString();
+        const datedMenuName = `${dateString} Menu`;
+        const datedMenuId = `dated_${dateString}`;
+        const datedMenuRef = doc(db, `/artifacts/${appId}/spaces/${spaceId}/menus`, datedMenuId);
+        const datedMenuDoc = await getDoc(datedMenuRef);
+
+        if (!datedMenuDoc.exists()) {
+          // Create the dated menu with Today's Menu data
+          await setDoc(datedMenuRef, {
+            name: datedMenuName,
+            recipeIds: menuData.recipeIds || [],
+            createdAt: menuData.createdAt || Date.now(),
+            updatedAt: Date.now(),
+            archivedFrom: todaysMenuId,
+            date: dateString
+          });
+
+          // Delete Today's Menu (it will be recreated for the new day)
+          await deleteDoc(menuRef);
+
+          console.log(`Today's Menu archived as "${datedMenuName}"`);
+        }
+      }
+    };
+
+    // Check every minute if it's 11:59 PM
+    const checkAndArchive = () => {
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
+
+      // Archive at 11:59 PM
+      if (hours === 23 && minutes === 59) {
+        archiveTodaysMenu();
+      }
+    };
+
+    // Check immediately and then every minute
+    checkAndArchive();
+    const interval = setInterval(checkAndArchive, 60000); // Check every minute
+
+    return () => clearInterval(interval);
+  }, [isFirebaseReady, spaceId, db]);
 
   // Handle scroll to hide/show filters on mobile
   useEffect(() => {
@@ -493,6 +581,7 @@ export default function CleanPlateCasino() {
   const handleRemoveImage = () => {
     setImageFile(null);
     setImagePreview(null);
+    setImageRemoved(true); // Mark that image was removed
     setNewDish({...newDish, img: ''});
   };
 
@@ -567,11 +656,47 @@ export default function CleanPlateCasino() {
     setIsDragging(false);
   };
 
-  const handleSwipeLike = () => {
+  const handleSwipeLike = async () => {
     const recipeId = currentRecipe.id || currentRecipe.name;
-    if (!currentMenuIds.includes(recipeId)) {
-      setCurrentMenuIds([...currentMenuIds, recipeId]);
+    const todaysMenuId = getTodaysMenuId();
+
+    // Add to Today's Menu
+    if (isFirebaseReady && spaceId && db) {
+      try {
+        const menuRef = doc(db, `/artifacts/${appId}/spaces/${spaceId}/menus`, todaysMenuId);
+        const menuDoc = await getDoc(menuRef);
+
+        if (menuDoc.exists()) {
+          // Menu exists - add recipe if not already present
+          const menuData = menuDoc.data();
+          const currentRecipeIds = menuData.recipeIds || [];
+          if (!currentRecipeIds.includes(recipeId)) {
+            await updateDoc(menuRef, {
+              recipeIds: [...currentRecipeIds, recipeId],
+              updatedAt: Date.now()
+            });
+          }
+        } else {
+          // Create Today's Menu if it doesn't exist
+          await setDoc(menuRef, {
+            name: "Today's Menu",
+            recipeIds: [recipeId],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            isTodaysMenu: true,
+            date: getTodayDateString()
+          });
+          console.log(`Created Today's Menu and added ${currentRecipe.name}`);
+        }
+      } catch (e) {
+        console.error("Error adding to Today's Menu:", e);
+        alert(`Failed to add to Today's Menu: ${e.message}`);
+        // Fallback: still spin to next recipe even if save fails
+      }
+    } else {
+      console.warn('Cannot add to Today\'s Menu: Firebase not ready');
     }
+
     // Move to next recipe
     handleSpin();
   };
@@ -600,46 +725,42 @@ export default function CleanPlateCasino() {
       return;
     }
 
-    // Determine image: upload new image to Storage, or use existing URL, or generate with Gemini
+    // Determine image: upload new image to Storage, or use existing, or generate with Gemini
     let finalImage = '';
     let imagePrompt = null;
     
     if (imageFile) {
+      // New image uploaded - upload to Firebase Storage
       if (storage && spaceId) {
-        // New image uploaded - upload to Firebase Storage
         try {
           finalImage = await uploadImageToStorage(imageFile, spaceId);
         } catch (e) {
           console.error("Error uploading image to Storage:", e);
-          alert('Failed to upload image. Please enable Firebase Storage in the Firebase Console or use an image URL instead.');
+          alert('Failed to upload image. Please try again.');
           return;
         }
       } else {
-        alert('Firebase Storage is not available. Please enable Storage in Firebase Console or use an image URL instead.');
+        alert('Firebase Storage is not available. Please enable Storage in Firebase Console.');
         return;
       }
-    } else if (newDish.img && newDish.img.trim()) {
-      // Image URL provided (not a base64 data URL)
-      if (!newDish.img.startsWith('data:')) {
-        finalImage = newDish.img.trim();
-      } else {
-        // If it's a base64 data URL, we need to upload it
-        alert('Please wait for image upload to complete or use an image URL instead.');
-        return;
-      }
-    } else if (editingRecipe && editingRecipe.img) {
-      // Editing and no new image - keep existing
+    } else if (editingRecipe && editingRecipe.img && !imageRemoved) {
+      // Editing and no new image and image not removed - keep existing
       finalImage = editingRecipe.img;
     } else {
-      // No image - use placeholder temporarily, will be replaced by Gemini-generated image
+      // No image uploaded or image was removed - generate with Gemini
+      // Use placeholder temporarily until Gemini generates the image
       finalImage = `https://placehold.co/800x600/d97706/ffffff?text=${newDish.name.trim().split(' ').map(n=>n[0]).join('')}`;
       // Generate prompt for Gemini image generation
       imagePrompt = getDishImagePrompt(newDish.name.trim());
     }
 
+    // Debug: Log the newDish state before creating dish object
+    console.log('newDish state before saving:', newDish);
+    console.log('newDish.cuisine value:', newDish.cuisine);
+    
     const dish = {
       name: newDish.name.trim(),
-      cuisine: newDish.cuisine,
+      cuisine: newDish.cuisine, // Use the selected cuisine from the form
       protein: newDish.protein,
       cals: parseInt(newDish.cals) || 0,
       time: newDish.time.trim() || '30m',
@@ -652,6 +773,10 @@ export default function CleanPlateCasino() {
       // Add imagePrompt if no image was uploaded (for Gemini generation)
       imagePrompt: imagePrompt || editingRecipe?.imagePrompt || null
     };
+    
+    // Debug: Log the dish being saved to verify cuisine is correct
+    console.log('Saving dish with cuisine:', dish.cuisine, 'for dish:', dish.name);
+    console.log('Full dish object:', dish);
 
     let saveSuccessful = false;
 
@@ -697,20 +822,21 @@ export default function CleanPlateCasino() {
     // Only close modal and reset form if save was successful
     if (saveSuccessful) {
       // Reset form and close modal
-      setNewDish({
-        name: '',
-        cuisine: 'Mediterranean',
-        protein: 'Chicken',
-        cals: '',
-        time: '',
-        img: '',
-        healthTag: 'Healthy',
-        freeformTag: ''
-      });
-      setImageFile(null);
-      setImagePreview(null);
-      setEditingRecipe(null);
-      setShowAddForm(false);
+    setNewDish({
+      name: '',
+      cuisine: 'Japanese',
+      protein: 'Chicken',
+      cals: '',
+      time: '',
+      img: '',
+      healthTag: 'Healthy',
+      freeformTag: ''
+    });
+    setImageFile(null);
+    setImagePreview(null);
+    setImageRemoved(false); // Reset image removed flag when closing
+    setEditingRecipe(null);
+    setShowAddForm(false);
     }
   };
 
@@ -754,6 +880,47 @@ export default function CleanPlateCasino() {
           setCurrentRecipe(remainingRecipes[0]);
         }
       }
+    }
+  };
+
+  // Add recipe to Today's Menu (used in browse view)
+  const addToTodaysMenu = async (recipe) => {
+    if (!recipe || !isFirebaseReady || !spaceId || !db) {
+      console.warn('Cannot add to Today\'s Menu: missing requirements');
+      return;
+    }
+
+    const recipeId = recipe.id || recipe.name;
+    const todaysMenuId = getTodaysMenuId();
+
+    try {
+      // Check if Today's Menu exists
+      const menuRef = doc(db, `/artifacts/${appId}/spaces/${spaceId}/menus`, todaysMenuId);
+      const menuDoc = await getDoc(menuRef);
+
+      if (menuDoc.exists()) {
+        // Menu exists - add recipe if not already present
+        const menuData = menuDoc.data();
+        if (!menuData.recipeIds.includes(recipeId)) {
+          await updateDoc(menuRef, {
+            recipeIds: [...menuData.recipeIds, recipeId],
+            updatedAt: Date.now()
+          });
+        }
+      } else {
+        // Create Today's Menu
+        await setDoc(menuRef, {
+          name: "Today's Menu",
+          recipeIds: [recipeId],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          isTodaysMenu: true,
+          date: getTodayDateString()
+        });
+      }
+    } catch (e) {
+      console.error("Error adding to Today's Menu:", e);
+      alert('Failed to add dish to Today\'s Menu. Please try again.');
     }
   };
 
@@ -854,6 +1021,7 @@ export default function CleanPlateCasino() {
     }
   };
 
+
   const loadMenu = (recipeIds) => {
     setCurrentMenuIds(recipeIds);
     console.log("Menu loaded!");
@@ -941,9 +1109,19 @@ export default function CleanPlateCasino() {
     if (!viewingRecipe) return;
     setViewingRecipe(null);
     setEditingRecipe(viewingRecipe);
+    
+    // If the recipe's cuisine is not in CUISINES list, default to first available cuisine
+    const validCuisines = CUISINES.filter(c => c !== 'All');
+    const recipeCuisine = viewingRecipe.cuisine;
+    const cuisineToUse = validCuisines.includes(recipeCuisine) ? recipeCuisine : validCuisines[0];
+    
+    console.log('handleEditRecipe - recipe cuisine:', recipeCuisine);
+    console.log('handleEditRecipe - valid cuisines:', validCuisines);
+    console.log('handleEditRecipe - cuisine to use:', cuisineToUse);
+    
     setNewDish({
       name: viewingRecipe.name,
-      cuisine: viewingRecipe.cuisine,
+      cuisine: cuisineToUse, // Use valid cuisine
       protein: viewingRecipe.protein,
       cals: viewingRecipe.cals.toString(),
       time: viewingRecipe.time,
@@ -953,6 +1131,7 @@ export default function CleanPlateCasino() {
     });
     setImagePreview(null);
     setImageFile(null);
+    setImageRemoved(false); // Reset image removed flag when starting to edit
     setRecipeNote(viewingRecipe.notes || '');
     setShowAddForm(true);
   };
@@ -963,7 +1142,7 @@ export default function CleanPlateCasino() {
     setEditingRecipe(null);
     setNewDish({
       name: '',
-      cuisine: 'Mediterranean',
+      cuisine: 'Japanese',
       protein: 'Chicken',
       cals: '',
       time: '',
@@ -999,8 +1178,90 @@ export default function CleanPlateCasino() {
 
   // --- RENDER: MENU MANAGER VIEW ---
   const renderMenuManager = () => {
-    const currentMenuRecipes = getCurrentMenuRecipes();
-    const currentMenuTotalCals = currentMenuRecipes.reduce((sum, r) => sum + r.cals, 0);
+    // Get Today's Menu from saved menus
+    const todaysMenuId = getTodaysMenuId();
+    const todaysMenu = savedMenus.find(m => m.id === todaysMenuId);
+    const todaysMenuRecipeIds = todaysMenu?.recipeIds || [];
+    
+    // Filter recipes - need to match IDs properly (handle both string and number IDs)
+    const todaysMenuRecipes = recipes.filter(r => {
+      const recipeId = r.id || r.name;
+      // Convert both to strings for comparison to handle type mismatches
+      return todaysMenuRecipeIds.some(menuId => String(menuId) === String(recipeId));
+    });
+    
+    // Clean up invalid recipe IDs from Today's Menu (recipes that no longer exist)
+    const missingIds = todaysMenuRecipeIds.filter(menuId => 
+      !recipes.some(r => String(r.id || r.name) === String(menuId))
+    );
+    
+    if (missingIds.length > 0 && todaysMenu && isFirebaseReady && spaceId && db) {
+      const validRecipeIds = todaysMenuRecipeIds.filter(menuId => 
+        recipes.some(r => String(r.id || r.name) === String(menuId))
+      );
+      
+      // Update the menu to remove invalid IDs
+      const menuRef = doc(db, `/artifacts/${appId}/spaces/${spaceId}/menus`, todaysMenuId);
+      updateDoc(menuRef, {
+        recipeIds: validRecipeIds,
+        updatedAt: Date.now()
+      }).catch(e => {
+        console.error('Error cleaning up Today\'s Menu:', e);
+      });
+    }
+    
+    const todaysMenuTotalCals = todaysMenuRecipes.reduce((sum, r) => sum + (r.cals || 0), 0);
+
+    // Save Today's Menu as a dated menu
+    const saveTodaysMenu = async () => {
+      if (!todaysMenu || !isFirebaseReady || !spaceId || !db) {
+        alert('Cannot save Today\'s Menu. Please try again.');
+        return;
+      }
+
+      if (todaysMenuRecipeIds.length === 0) {
+        alert('Today\'s Menu is empty. Add some dishes first.');
+        return;
+      }
+
+      try {
+        const dateString = getTodayDateString();
+        const datedMenuName = `${dateString} Menu`;
+        const datedMenuId = `dated_${dateString}`;
+        
+        // Check if dated menu already exists
+        const datedMenuRef = doc(db, `/artifacts/${appId}/spaces/${spaceId}/menus`, datedMenuId);
+        const datedMenuDoc = await getDoc(datedMenuRef);
+
+        if (datedMenuDoc.exists()) {
+          // Update existing dated menu
+          await updateDoc(datedMenuRef, {
+            recipeIds: todaysMenuRecipeIds,
+            updatedAt: Date.now()
+          });
+          alert(`Today's Menu updated in "${datedMenuName}"`);
+        } else {
+          // Create new dated menu
+          await setDoc(datedMenuRef, {
+            name: datedMenuName,
+            recipeIds: todaysMenuRecipeIds,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            archivedFrom: todaysMenuId,
+            date: dateString
+          });
+          alert(`Today's Menu saved as "${datedMenuName}"`);
+        }
+      } catch (e) {
+        console.error("Error saving Today's Menu:", e);
+        alert('Failed to save Today\'s Menu. Please try again.');
+      }
+    };
+
+    // Filter out Today's Menu and dated menus from saved menus (they're shown separately)
+    const regularSavedMenus = savedMenus.filter(m => {
+      return m.id !== todaysMenuId && !m.id.startsWith('dated_');
+    });
 
     return (
       <div className="min-h-screen bg-white pb-32">
@@ -1016,21 +1277,21 @@ export default function CleanPlateCasino() {
 
         <div className="p-8 space-y-16 max-w-4xl mx-auto">
           
-          {/* Current Menu (Today's Menu) */}
+          {/* Today's Menu */}
           <div className="border-b border-stone-200 pb-12">
             <div className="text-center mb-12">
               <h3 className="text-2xl font-light text-stone-900 mb-2 tracking-wide uppercase">
                 Today's Menu
               </h3>
               <div className="text-xs text-stone-500 uppercase tracking-widest">
-                {currentMenuIds.length} {currentMenuIds.length === 1 ? 'Dish' : 'Dishes'}
+                {todaysMenuRecipeIds.length} {todaysMenuRecipeIds.length === 1 ? 'Dish' : 'Dishes'}
               </div>
             </div>
             
-            {currentMenuIds.length === 0 ? (
+            {todaysMenuRecipeIds.length === 0 ? (
               <div className="text-center py-16">
-                <p className="text-stone-400 text-sm mb-2">No dishes in your menu yet.</p>
-                <p className="text-stone-500 text-xs uppercase tracking-wider">Swipe right on recipes in the Spin tab to add them</p>
+                <p className="text-stone-400 text-sm mb-2">No dishes added today yet.</p>
+                <p className="text-stone-500 text-xs uppercase tracking-wider">Like dishes in Browse to add them to Today's Menu</p>
               </div>
             ) : (
               <>
@@ -1039,33 +1300,65 @@ export default function CleanPlateCasino() {
                     <div className="text-right">
                       <div className="text-xs text-stone-400 uppercase tracking-widest mb-1">Total</div>
                       <div className="text-2xl font-light text-stone-900 tracking-wide">
-                        {currentMenuTotalCals} <span className="text-sm text-stone-500">kcal</span>
+                        {todaysMenuTotalCals} <span className="text-sm text-stone-500">kcal</span>
                       </div>
                     </div>
+                    <div className="flex items-center gap-4">
                     <button
-                      onClick={() => {
+                        onClick={saveTodaysMenu}
+                        className="text-xs text-stone-900 hover:text-stone-600 uppercase tracking-widest border-b border-stone-900 hover:border-stone-600 transition-colors pb-1 flex items-center gap-2"
+                      >
+                        <Save size={14} strokeWidth={1.5} />
+                        Save Menu
+                      </button>
+                      <button
+                        onClick={async () => {
                         if (window.confirm('Clear all dishes from today\'s menu?')) {
-                          setCurrentMenuIds([]);
+                            if (todaysMenu && isFirebaseReady && spaceId && db) {
+                              try {
+                                const menuRef = doc(db, `/artifacts/${appId}/spaces/${spaceId}/menus`, todaysMenuId);
+                                await updateDoc(menuRef, {
+                                  recipeIds: [],
+                                  updatedAt: Date.now()
+                                });
+                              } catch (e) {
+                                console.error("Error clearing Today's Menu:", e);
+                                alert('Failed to clear menu. Please try again.');
+                              }
+                            }
                         }
                       }}
                       className="text-xs text-stone-400 hover:text-stone-900 uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
                     >
                       Clear All
                     </button>
+                    </div>
                   </div>
                   
                   {/* Recipe Cards Grid */}
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
-                    {currentMenuRecipes.map((recipe, index) => {
+                    {todaysMenuRecipes.map((recipe, index) => {
                       const recipeId = recipe.id || recipe.name || index;
                       return (
                         <RecipeCard
                           key={recipeId}
                           recipe={recipe}
                           onAddToMenu={null}
-                          onDelete={(r) => {
+                          onDelete={async (r) => {
                             const id = r.id || r.name;
-                            setCurrentMenuIds(currentMenuIds.filter(did => did !== id));
+                            if (todaysMenu && isFirebaseReady && spaceId && db) {
+                              try {
+                                const menuRef = doc(db, `/artifacts/${appId}/spaces/${spaceId}/menus`, todaysMenuId);
+                                const updatedRecipeIds = todaysMenuRecipeIds.filter(rid => rid !== id);
+                                await updateDoc(menuRef, {
+                                  recipeIds: updatedRecipeIds,
+                                  updatedAt: Date.now()
+                                });
+                              } catch (e) {
+                                console.error("Error removing from Today's Menu:", e);
+                                alert('Failed to remove dish. Please try again.');
+                              }
+                            }
                           }}
                           savedMenus={savedMenus}
                         />
@@ -1073,45 +1366,11 @@ export default function CleanPlateCasino() {
                     })}
                   </div>
                 </div>
-                
-                {/* Save Menu Section - Minimalist */}
-                <div className="border-t border-stone-200 pt-8">
-                  <div className="flex gap-3 max-w-md mx-auto">
-                    <input
-                      type="text"
-                      placeholder="Menu name (optional)"
-                      value={menuNameInput}
-                      onChange={(e) => setMenuNameInput(e.target.value)}
-                      className="flex-1 p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none text-sm bg-transparent"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && menuNameInput.trim()) {
-                          saveMenu(menuNameInput.trim());
-                          setMenuNameInput('');
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={() => {
-                        if (menuNameInput.trim()) {
-                          saveMenu(menuNameInput.trim());
-                          setMenuNameInput('');
-                        } else {
-                          const defaultName = `Menu ${savedMenus.length + 1}`;
-                          saveMenu(defaultName);
-                        }
-                      }}
-                      disabled={currentMenuIds.length === 0}
-                      className="text-stone-600 hover:text-stone-900 text-sm uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1 disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      Save
-                    </button>
-                  </div>
-                </div>
               </>
             )}
-          </div>
-          
-          {/* Saved Menus */}
+                </div>
+                
+          {/* Saved Menus (including dated menus) */}
           <div className="border-b border-stone-200 pb-12">
             <div className="text-center mb-12">
               <h3 className="text-2xl font-light text-stone-900 mb-2 tracking-wide uppercase">
@@ -1121,11 +1380,105 @@ export default function CleanPlateCasino() {
             
             {!isFirebaseReady && <p className="text-center text-stone-400 text-sm uppercase tracking-wider">Connecting to storage...</p>}
 
-            {savedMenus.length === 0 ? (
-              <p className="text-center text-stone-400 text-sm">No saved menus yet. Save your first menu above.</p>
+            {regularSavedMenus.length === 0 && savedMenus.filter(m => m.id.startsWith('dated_')).length === 0 ? (
+              <p className="text-center text-stone-400 text-sm">No saved menus yet. Today's Menu will be saved automatically at the end of the day.</p>
             ) : (
               <div className="space-y-6">
-                {savedMenus.map(menu => {
+                {/* Show dated menus first */}
+                {savedMenus.filter(m => m.id.startsWith('dated_')).sort((a, b) => {
+                  // Sort by date descending (newest first)
+                  const dateA = a.date || a.name.split(' ')[0] || '';
+                  const dateB = b.date || b.name.split(' ')[0] || '';
+                  return dateB.localeCompare(dateA);
+                }).map(menu => {
+                  const menuRecipes = recipes.filter(r => {
+                    const recipeId = r.id || r.name;
+                    return menu.recipeIds.includes(recipeId);
+                  });
+                  const menuTotalCals = menuRecipes.reduce((sum, r) => sum + r.cals, 0);
+                  
+                  return (
+                    <div key={menu.id} className="border-b border-stone-100 pb-6 last:border-0">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex-1">
+                          {editingMenuId === menu.id ? (
+                            <div className="flex items-center gap-3 mb-2">
+                    <input
+                      type="text"
+                                value={editingMenuName}
+                                onChange={(e) => setEditingMenuName(e.target.value)}
+                      onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    updateMenuName(menu.id, editingMenuName);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingMenuId(null);
+                                    setEditingMenuName('');
+                                  }
+                                }}
+                                className="flex-1 text-xl font-light text-stone-900 tracking-wide border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => updateMenuName(menu.id, editingMenuName)}
+                                className="text-stone-600 hover:text-stone-900 text-xs uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
+                              >
+                                Save
+                              </button>
+                    <button
+                      onClick={() => {
+                                  setEditingMenuId(null);
+                                  setEditingMenuName('');
+                                }}
+                                className="text-stone-400 hover:text-stone-900 transition-colors"
+                              >
+                                <X size={16} strokeWidth={1.5} />
+                              </button>
+                            </div>
+                          ) : (
+                            <h4 className="text-xl font-light text-stone-900 mb-2 tracking-wide">{menu.name}</h4>
+                          )}
+                          <div className="flex items-center gap-4 text-xs text-stone-500 uppercase tracking-wider">
+                            <span>{menu.recipeIds.length} {menu.recipeIds.length === 1 ? 'Dish' : 'Dishes'}</span>
+                            <span className="text-stone-300">•</span>
+                            <span>{menuTotalCals} kcal</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setViewingMenu(menu);
+                            }}
+                            className="text-stone-600 hover:text-stone-900 text-xs uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingMenuId(menu.id);
+                              setEditingMenuName(menu.name);
+                            }}
+                            className="text-stone-400 hover:text-stone-900 transition-colors"
+                          >
+                            <Pencil size={14} strokeWidth={1.5} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Delete "${menu.name}"?`)) {
+                                deleteMenu(menu.id);
+                              }
+                            }}
+                            className="text-stone-400 hover:text-stone-900 transition-colors"
+                          >
+                            <Trash2 size={14} strokeWidth={1.5} />
+                    </button>
+                  </div>
+                </div>
+          </div>
+                  );
+                })}
+                
+                {/* Then show regular saved menus */}
+                {regularSavedMenus.map(menu => {
                   const menuRecipes = recipes.filter(r => {
                     const recipeId = r.id || r.name;
                     return menu.recipeIds.includes(recipeId);
@@ -1412,11 +1765,22 @@ export default function CleanPlateCasino() {
           onClose={handleCloseAddForm}
           editingRecipe={editingRecipe}
           newDish={newDish}
-          onNewDishChange={setNewDish}
+          onNewDishChange={(updatedDish) => {
+            console.log('onNewDishChange called with:', updatedDish);
+            console.log('Cuisine value:', updatedDish.cuisine);
+            // Ensure cuisine is valid - if not, use first available
+            const validCuisines = CUISINES.filter(c => c !== 'All');
+            if (!validCuisines.includes(updatedDish.cuisine)) {
+              console.warn('Invalid cuisine detected:', updatedDish.cuisine, 'defaulting to:', validCuisines[0]);
+              updatedDish.cuisine = validCuisines[0];
+            }
+            setNewDish(updatedDish);
+          }}
           imagePreview={imagePreview}
           onImageSelect={handleImageSelect}
           onRemoveImage={handleRemoveImage}
           onSubmit={handleAddDish}
+          imageRemoved={imageRemoved}
         />
         
         {/* Space Selector Modal */}
@@ -1710,7 +2074,7 @@ export default function CleanPlateCasino() {
 
         {/* Controls */}
         <div className="w-full max-w-md space-y-4">
-          
+
           {/* Action Buttons */}
           <div className="flex gap-4 mb-4">
             <button 

@@ -17,7 +17,7 @@ src/
 
 Edit `src/constants/filters.js`:
 ```javascript
-export const CUISINES = ["All", "Japanese", "American", "Chinese", "Korean", "Mexican", "Italian", "NEW_CUISINE"];
+export const CUISINES = ["All", "Japanese", "American", "Chinese", "Korean", "Mexican", "Italian", "Mediterranean", "NEW_CUISINE"];
 ```
 
 ### Adding a Default Recipe

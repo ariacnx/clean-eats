@@ -71,14 +71,26 @@ export const RecipeCard = ({
           {recipe.name}
         </h4>
         
-        {/* Details - Minimalist */}
-        <div className="flex items-center gap-3 text-xs text-stone-500 uppercase tracking-wider mt-auto">
-          <span>{recipe.cuisine}</span>
-          <span className="text-stone-300">•</span>
-          <span>{recipe.protein}</span>
-          <span className="text-stone-300">•</span>
-          <span>{recipe.time}</span>
-        </div>
+        {/* Details - Minimalist - Only show tags that exist */}
+        {(() => {
+          const tags = [];
+          if (recipe.cuisine) tags.push(recipe.cuisine);
+          if (recipe.protein) tags.push(recipe.protein);
+          if (recipe.healthTag) tags.push(recipe.healthTag);
+          
+          if (tags.length === 0) return null;
+          
+          return (
+            <div className="flex items-center gap-3 text-xs text-stone-500 uppercase tracking-wider mt-auto">
+              {tags.map((tag, index) => (
+                <React.Fragment key={index}>
+                  {index > 0 && <span className="text-stone-300">•</span>}
+                  <span>{tag}</span>
+                </React.Fragment>
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

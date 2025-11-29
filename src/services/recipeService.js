@@ -5,7 +5,7 @@ import {
   addDoc, 
   updateDoc, 
   deleteDoc, 
-  onSnapshot
+  onSnapshot 
 } from 'firebase/firestore';
 import { appId } from '../config/firebase';
 

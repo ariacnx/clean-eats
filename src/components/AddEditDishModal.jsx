@@ -15,7 +15,8 @@ export const AddEditDishModal = ({
   imagePreview,
   onImageSelect,
   onRemoveImage,
-  onSubmit
+  onSubmit,
+  imageRemoved = false
 }) => {
   if (!isOpen) return null;
 
@@ -55,7 +56,12 @@ export const AddEditDishModal = ({
               <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Cuisine</label>
               <select
                 value={newDish.cuisine}
-                onChange={(e) => onNewDishChange({...newDish, cuisine: e.target.value})}
+                onChange={(e) => {
+                  const selectedCuisine = e.target.value;
+                  console.log('Select onChange - selected value:', selectedCuisine);
+                  console.log('Select onChange - current newDish:', newDish);
+                  onNewDishChange({...newDish, cuisine: selectedCuisine});
+                }}
                 className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent appearance-none"
               >
                 {CUISINES.filter(c => c !== 'All').map(c => (
@@ -131,10 +137,10 @@ export const AddEditDishModal = ({
           <div>
             <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Image</label>
             
-            {(imagePreview || (editingRecipe && editingRecipe.img && !imagePreview && (newDish.img || newDish.img === editingRecipe.img))) ? (
+            {(imagePreview || (editingRecipe && editingRecipe.img && !imagePreview && !imageRemoved)) ? (
               <div className="relative">
                 <img 
-                  src={imagePreview || newDish.img || editingRecipe?.img} 
+                  src={imagePreview || editingRecipe?.img} 
                   alt="Preview" 
                   className="w-full h-48 object-cover border border-stone-200"
                 />
@@ -162,22 +168,11 @@ export const AddEditDishModal = ({
                   />
                 </label>
                 
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-stone-200"></div>
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-white px-2 text-stone-400">Or</span>
-                  </div>
+                <div className="text-center py-4 border border-stone-200">
+                  <p className="text-xs text-stone-500 uppercase tracking-wider mb-2">
+                    Or leave empty to generate with BANANA! 🍌
+                  </p>
                 </div>
-                
-                <input
-                  type="url"
-                  value={newDish.img}
-                  onChange={(e) => onNewDishChange({...newDish, img: e.target.value})}
-                  placeholder="Enter image URL..."
-                  className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent"
-                />
               </div>
             )}
           </div>
