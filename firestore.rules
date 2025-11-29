@@ -1,1 +1,42 @@
-g
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // SHARED RECIPES - Anyone can read, anyone can write (no auth needed)
+    match /artifacts/{appId}/sharedRecipes/{recipeId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // MENUS - Public access by menu ID (no auth needed)
+    // Anyone with the menu ID can read/write
+    match /artifacts/{appId}/menus/{menuId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // SPACES - Public access by space ID (no auth needed)
+    // Anyone with the space ID can read/write
+    match /artifacts/{appId}/spaces/{spaceId} {
+      allow read: if true;
+      allow write: if true;
+      
+      // Space data (current menu, etc.)
+      match /data/{document=**} {
+        allow read: if true;
+        allow write: if true;
+      }
+      
+      // Space menus
+      match /menus/{menuId} {
+        allow read: if true;
+        allow write: if true;
+      }
+    }
+
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

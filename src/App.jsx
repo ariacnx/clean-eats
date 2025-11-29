@@ -16,15 +16,10 @@ import {
   List,
   Plus,
   X,
-  Pencil
+  Pencil,
+  Copy
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  signInWithCustomToken, 
-  onAuthStateChanged 
-} from 'firebase/auth';
 import { 
   getFirestore, 
   doc, 
@@ -39,92 +34,63 @@ import {
   where 
 } from 'firebase/firestore';
 
-// --- DATA: Clean Eating Recipes (Default) ---
-const DEFAULT_RECIPES = [
-  // CHICKEN
-  { id: 1, name: "Lemon Herb Grilled Chicken", cuisine: "Mediterranean", protein: "Chicken", cals: 320, time: "25m", img: "https://images.unsplash.com/photo-1632778149955-e80f8ceca2e8?auto=format&fit=crop&q=80&w=800" },
-  { id: 2, name: "Thai Green Curry Chicken", cuisine: "Asian", protein: "Chicken", cals: 450, time: "40m", img: "https://images.unsplash.com/photo-1565557623262-b51c2513a641?auto=format&fit=crop&q=80&w=800" },
-  { id: 3, name: "Chicken Fajita Bowl", cuisine: "Mexican", protein: "Chicken", cals: 380, time: "20m", img: "https://images.unsplash.com/photo-1504544750208-dc0358e63f7f?auto=format&fit=crop&q=80&w=800" },
-  { id: 4, name: "Balsamic Glazed Chicken", cuisine: "Italian", protein: "Chicken", cals: 340, time: "35m", img: "https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?auto=format&fit=crop&q=80&w=800" },
-  
-  // BEEF
-  { id: 5, name: "Steak & Asparagus Stir-Fry", cuisine: "Asian", protein: "Beef", cals: 410, time: "20m", img: "https://images.unsplash.com/photo-1543340713-17b2ae519450?auto=format&fit=crop&q=80&w=800" },
-  { id: 6, name: "Carne Asada Lettuce Wraps", cuisine: "Mexican", protein: "Beef", cals: 350, time: "30m", img: "https://images.unsplash.com/photo-1541544744-375cfed75489?auto=format&fit=crop&q=80&w=800" },
-  { id: 7, name: "Mediterranean Beef Kebabs", cuisine: "Mediterranean", protein: "Beef", cals: 390, time: "25m", img: "https://images.unsplash.com/photo-1529193591184-b1d58069ecdd?auto=format&fit=crop&q=80&w=800" },
-  
-  // FISH
-  { id: 8, name: "Miso Glazed Salmon", cuisine: "Asian", protein: "Fish", cals: 420, time: "25m", img: "https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&q=80&w=800" },
-  { id: 9, name: "Baked Cod with Salsa Verde", cuisine: "Mediterranean", protein: "Fish", cals: 280, time: "20m", img: "https://images.unsplash.com/photo-1599084993091-1cb5c0721cc6?auto=format&fit=crop&q=80&w=800" },
-  { id: 10, name: "Fish Taco Salad", cuisine: "Mexican", protein: "Fish", cals: 340, time: "15m", img: "https://images.unsplash.com/photo-1512838243191-e62534c66ec3?auto=format&fit=crop&q=80&w=800" },
-  
-  // VEGETARIAN
-  { id: 11, name: "Quinoa Stuffed Peppers", cuisine: "Mexican", protein: "Vegetarian", cals: 310, time: "45m", img: "https://images.unsplash.com/photo-1628205167699-23847e231185?auto=format&fit=crop&q=80&w=800" },
-  { id: 12, name: "Greek Chickpea Salad", cuisine: "Mediterranean", protein: "Vegetarian", cals: 290, time: "10m", img: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=800" },
-  { id: 13, name: "Tofu Vegetable Curry", cuisine: "Asian", protein: "Vegetarian", cals: 360, time: "30m", img: "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&q=80&w=800" },
-];
+// Import constants
+import { DEFAULT_RECIPES, CUISINES, PROTEINS, HEALTH_TAGS } from './constants';
 
-const CUISINES = ["All", "Japanese", "American", "Chinese", "Korean", "Mexican", "Italian"];
-const PROTEINS = ["All", "Chicken", "Beef", "Seafood", "Pork","Vegetarian", "Dessert"];
-const HEALTH_TAGS = ["All", "Healthy", "Moderate Healthy", "Guilty Pleasure"];
+// Import utilities
+import { getHealthTag } from './utils/healthTag';
+import { loadRecipes, loadUserData, loadSavedMenus, saveSavedMenus } from './utils/localStorage';
 
-// Placeholder for Firebase/Auth instances
+// Import services
+import { subscribeToRecipes, addRecipe, updateRecipe, deleteRecipe, isFirebaseRecipeId } from './services/recipeService';
+import { 
+  subscribeToMenus, 
+  saveCurrentMenu, 
+  createMenuForSpace, 
+  updateMenuNameInSpace, 
+  addRecipeToMenuInSpace, 
+  deleteMenuFromSpace,
+  subscribeToCurrentMenu
+} from './services/menuService';
+import { 
+  getCurrentSpaceId, 
+  setCurrentSpaceId, 
+  createSpace, 
+  joinSpace,
+  getSpace
+} from './services/spaceService';
+
+// Import config
+import { appId } from './config/firebase';
+
+// Import components
+import { MenuSelectorModal } from './components/MenuSelectorModal';
+import { MenuJoinModal } from './components/MenuJoinModal';
+import { RecipeDetailModal } from './components/RecipeDetailModal';
+import { AddEditDishModal } from './components/AddEditDishModal';
+import { MenuDisplayModal } from './components/MenuDisplayModal';
+import { RecipeCard } from './components/RecipeCard';
+import { SlotReel } from './components/SlotReel';
+
+// Placeholder for Firebase instance
 let db = null;
-let auth = null;
 
-// --- COMPONENTS ---
-
-// 1. Slot Machine Reel Component
-const SlotReel = ({ value, label, isSpinning, icon: Icon }) => (
-  <div className="flex flex-col items-center gap-2 w-1/3">
-    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">{label}</span>
-      <div className={`relative w-full h-24 bg-white rounded-xl border-2 border-[#d6ced9] flex items-center justify-center overflow-hidden shadow-sm transition-all duration-300 ${isSpinning ? 'scale-95 opacity-80' : 'scale-100 opacity-100'}`}>
-      <div className={`absolute inset-0 bg-[#ded7e0]/20 flex flex-col items-center justify-center transition-transform duration-100 ${isSpinning ? 'animate-pulse translate-y-1' : 'translate-y-0'}`}>
-        <Icon size={28} className="text-amber-600 mb-1" />
-        <span className="font-bold text-gray-800 text-sm text-center px-1 truncate w-full">{isSpinning ? "..." : value}</span>
-      </div>
-    </div>
-  </div>
-);
-
-// 2. The Main App Component
+// --- MAIN APP COMPONENT ---
 export default function CleanPlateCasino() {
-  // Load recipes from localStorage or use defaults
-  const loadRecipes = () => {
-    try {
-      const saved = localStorage.getItem('cleaneats_recipes');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed.length > 0 ? parsed : DEFAULT_RECIPES;
-      }
-    } catch (e) {
-      console.error("Error loading recipes:", e);
-    }
-    return DEFAULT_RECIPES;
-  };
-
-  // Load user data from localStorage
-  const loadUserData = () => {
-    try {
-      const savedMenu = localStorage.getItem('cleaneats_currentMenu');
-      return {
-        currentMenu: savedMenu ? JSON.parse(savedMenu) : []
-      };
-    } catch (e) {
-      console.error("Error loading user data:", e);
-      return { currentMenu: [] };
-    }
-  };
-
-  const [recipes, setRecipes] = useState(() => DEFAULT_RECIPES); // Start with defaults, Firebase will load shared recipes
-  const [view, setView] = useState('spin'); // 'spin', 'browse', or 'menus'
+  // Load initial data using utilities
   const userData = loadUserData();
+
+  const [recipes, setRecipes] = useState(() => loadRecipes(DEFAULT_RECIPES)); // Start with defaults, Firebase will load shared recipes
+  const [view, setView] = useState('spin'); // 'spin', 'browse', or 'menus'
   const [currentMenuIds, setCurrentMenuIds] = useState(userData.currentMenu); // Current working menu
   const [savedMenus, setSavedMenus] = useState([]); // Saved Menus (formerly templates)
   
   const [currentRecipe, setCurrentRecipe] = useState(DEFAULT_RECIPES[0]);
   const [isSpinning, setIsSpinning] = useState(false);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [userId, setUserId] = useState(null);
+  const [isFirebaseReady, setIsFirebaseReady] = useState(false);
+  const [spaceId, setSpaceId] = useState(null);
+  const [spaceName, setSpaceName] = useState('');
+  const [showSpaceSelector, setShowSpaceSelector] = useState(false);
   
   // Swipe gesture state
   const [swipePosition, setSwipePosition] = useState({ x: 0, y: 0 });
@@ -190,78 +156,62 @@ export default function CleanPlateCasino() {
   }, [currentMenuIds]);
 
   const currentMenuCount = currentMenuIds.length;
-  const appId = typeof window !== 'undefined' && typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
 
   // --- FIREBASE SETUP & DATA LOADING ---
 
   useEffect(() => {
     // Set a timeout to ensure app loads even if Firebase hangs
     const timeoutId = setTimeout(() => {
-      if (!isAuthReady) {
+      if (!isFirebaseReady) {
         console.warn("Firebase initialization taking too long, proceeding without it.");
-        setIsAuthReady(true);
+        setIsFirebaseReady(true);
       }
     }, 5000); // 5 second timeout
 
     try {
       const firebaseConfig = JSON.parse(typeof window !== 'undefined' && typeof window.__firebase_config !== 'undefined' ? window.__firebase_config : '{}');
       if (!firebaseConfig.apiKey || firebaseConfig.apiKey === 'YOUR_API_KEY') {
-        console.warn("Firebase config not set. App will work but templates won't be saved.");
+        console.warn("Firebase config not set. App will work but data won't be saved.");
         clearTimeout(timeoutId);
-        setIsAuthReady(true);
+        setIsFirebaseReady(true);
         return;
       }
       const app = initializeApp(firebaseConfig);
       db = getFirestore(app);
-      auth = getAuth(app);
       
-      // Set isAuthReady to true immediately after Firebase is initialized
-      // (even if user isn't authenticated yet - we'll wait for that separately)
-      setIsAuthReady(true);
+      // Set isFirebaseReady to true immediately after Firebase is initialized
+      setIsFirebaseReady(true);
+      clearTimeout(timeoutId);
       
-      const unsubscribe = onAuthStateChanged(auth, async (user) => {
-        if (!user) {
+      // Load current space ID from localStorage
+      const savedSpaceId = getCurrentSpaceId();
+      if (savedSpaceId) {
+        setSpaceId(savedSpaceId);
+        // Load space metadata (name) for convenience
+        (async () => {
           try {
-            // Sign in anonymously if no user is found
-            await signInAnonymously(auth);
-          } catch (authError) {
-            console.error("Anonymous sign-in failed:", authError);
-            if (authError.code === 'auth/configuration-not-found') {
-              console.warn("⚠️ Anonymous Authentication is not enabled in Firebase Console.");
-              console.warn("Please enable it at: https://console.firebase.google.com/project/cleaneats-49351/authentication/providers");
-              console.warn("The app will work with localStorage fallback, but menus won't sync across devices.");
+            const space = await getSpace(db, savedSpaceId);
+            if (space && space.name) {
+              setSpaceName(space.name);
             }
-            // Don't set isAuthReady to false - keep it true so app can work
-            // App will use localStorage fallback
+          } catch (e) {
+            console.error('Error loading space name:', e);
           }
-        } else {
-          clearTimeout(timeoutId);
-          setUserId(user.uid);
-          console.log("✅ Firebase authenticated:", user.uid);
-        }
-      });
-
-      // Attempt custom token sign-in if available
-      if (typeof window !== 'undefined' && typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
-        signInWithCustomToken(auth, window.__initial_auth_token).catch(e => {
-          console.error("Custom token sign-in failed, proceeding with anonymous.", e);
-        });
+        })();
+      } else {
+        // Show space selector if no space is selected
+        setShowSpaceSelector(true);
       }
-
-      return () => {
-        clearTimeout(timeoutId);
-        unsubscribe();
-      };
     } catch (e) {
       console.error("Firebase initialization failed:", e);
       clearTimeout(timeoutId);
-      setIsAuthReady(true); // Proceed without persistence if init fails
+      setIsFirebaseReady(true); // Proceed without persistence if init fails
     }
   }, []);
 
   // Load shared recipes from Firebase (public, everyone can see/edit)
   useEffect(() => {
-    if (!isAuthReady || !db) return;
+    if (!isFirebaseReady || !db) return;
 
     const sharedRecipesRef = collection(db, `/artifacts/${appId}/sharedRecipes`);
     
@@ -285,54 +235,28 @@ export default function CleanPlateCasino() {
     });
 
     return () => unsubscribe();
-  }, [isAuthReady, appId]);
+  }, [isFirebaseReady, appId]);
 
-  // Load and sync user data with Firebase (favorites, daily menu - private)
+  // Load and sync current menu for space
   useEffect(() => {
-    if (!isAuthReady || !userId || !db) return;
+    if (!isFirebaseReady || !spaceId || !db) return;
 
-    const userDocRef = doc(db, `/artifacts/${appId}/users/${userId}/data`, 'userData');
-    
-    // Load user data from Firebase
-    const loadUserDataFromFirebase = async () => {
-      try {
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          if (data.currentMenu) setCurrentMenuIds(data.currentMenu);
-        }
-      } catch (e) {
-        console.error("Error loading user data from Firebase:", e);
-      }
-    };
-
-    loadUserDataFromFirebase();
-
-    // Set up real-time listener for user data
-    const unsubscribe = onSnapshot(userDocRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.currentMenu) setCurrentMenuIds(data.currentMenu);
-      }
-    }, (error) => {
-      console.error("Error listening to user data:", error);
+    // Set up real-time listener for current menu
+    const unsubscribe = subscribeToCurrentMenu(db, spaceId, (recipeIds) => {
+      setCurrentMenuIds(recipeIds);
     });
 
     return () => unsubscribe();
-  }, [isAuthReady, userId, appId]);
+  }, [isFirebaseReady, spaceId]);
 
-  // Save user data to Firebase whenever it changes (favorites, daily menu only - not recipes)
+  // Save current menu to Firebase whenever it changes
   useEffect(() => {
-    if (!isAuthReady || !userId || !db) return;
+    if (!isFirebaseReady || !spaceId || !db) return;
 
-    const userDocRef = doc(db, `/artifacts/${appId}/users/${userId}/data`, 'userData');
-    
+    // Use service to save current menu
     const saveToFirebase = async () => {
       try {
-        await setDoc(userDocRef, {
-          currentMenu: currentMenuIds,
-          lastUpdated: Date.now()
-        }, { merge: true });
+        await saveCurrentMenu(db, spaceId, currentMenuIds);
       } catch (e) {
         console.error("Error saving to Firebase:", e);
       }
@@ -341,49 +265,30 @@ export default function CleanPlateCasino() {
     // Debounce Firebase saves to avoid too many writes
     const timeoutId = setTimeout(saveToFirebase, 1000);
     return () => clearTimeout(timeoutId);
-  }, [isAuthReady, userId, currentMenuIds, appId]);
+  }, [isFirebaseReady, spaceId, currentMenuIds]);
 
   // Load saved menus from localStorage on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('cleaneats_savedMenus');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Only load local menus if Firebase hasn't loaded yet
-        if (savedMenus.length === 0) {
-          setSavedMenus(parsed);
-        }
-      }
-    } catch (e) {
-      console.error("Error loading menus from localStorage:", e);
+    const localMenus = loadSavedMenus();
+    // Only load local menus if Firebase hasn't loaded yet
+    if (savedMenus.length === 0 && localMenus.length > 0) {
+      setSavedMenus(localMenus);
     }
   }, []);
 
   // Real-time Saved Menus Listener
   useEffect(() => {
-    if (!isAuthReady || !userId || !db) return;
+    if (!isFirebaseReady || !spaceId || !db) return;
 
-    const menusCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/savedMenus`);
-    
-    const unsubscribe = onSnapshot(menusCollectionRef, (snapshot) => {
-      const loadedMenus = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+    // Use service to subscribe to menus
+    const unsubscribe = subscribeToMenus(db, spaceId, (loadedMenus) => {
       setSavedMenus(loadedMenus);
-      
       // Also sync to localStorage as backup
-      try {
-        localStorage.setItem('cleaneats_savedMenus', JSON.stringify(loadedMenus));
-      } catch (e) {
-        console.error("Error saving menus to localStorage:", e);
-      }
-    }, (error) => {
-      console.error("Error listening to saved menus:", error);
+      saveSavedMenus(loadedMenus);
     });
 
     return () => unsubscribe();
-  }, [isAuthReady, userId, appId]);
+  }, [isFirebaseReady, spaceId]);
 
   // Handle scroll to hide/show filters on mobile
   useEffect(() => {
@@ -602,25 +507,23 @@ export default function CleanPlateCasino() {
       freeformTag: newDish.freeformTag.trim() || '',
       notes: editingRecipe?.notes || '',
       createdAt: editingRecipe?.createdAt || Date.now(),
-      createdBy: editingRecipe?.createdBy || userId || 'anonymous'
+      createdBy: editingRecipe?.createdBy || spaceId || 'anonymous'
     };
 
     // If editing, update existing recipe
-    if (editingRecipe && editingRecipe.id && typeof editingRecipe.id === 'string' && editingRecipe.id.length >= 20 && !editingRecipe.id.startsWith('local_') && isAuthReady && db) {
+    if (editingRecipe && isFirebaseRecipeId(editingRecipe.id) && isFirebaseReady && db) {
       try {
-        const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, editingRecipe.id);
-        await updateDoc(recipeDocRef, dish);
+        await updateRecipe(db, editingRecipe.id, dish);
         // Recipe will be updated automatically via the real-time listener
       } catch (e) {
         console.error("Error updating recipe in Firebase:", e);
         alert('Failed to update recipe. Please try again.');
         return;
       }
-    } else if (isAuthReady && db) {
+    } else if (isFirebaseReady && db) {
       // Save new recipe to Firebase shared recipes collection
       try {
-        const sharedRecipesRef = collection(db, `/artifacts/${appId}/sharedRecipes`);
-        await addDoc(sharedRecipesRef, dish);
+        await addRecipe(db, dish);
         // Recipe will be added automatically via the real-time listener
       } catch (e) {
         console.error("Error saving recipe to Firebase:", e);
@@ -667,7 +570,7 @@ export default function CleanPlateCasino() {
       
       // If it's a shared recipe (has Firebase doc ID - typically 20 chars), delete from Firebase
       // Firebase IDs are alphanumeric strings, typically 20 characters long
-      if (recipe.id && typeof recipe.id === 'string' && recipe.id.length >= 20 && !recipe.id.startsWith('local_') && isAuthReady && db) {
+      if (recipe.id && typeof recipe.id === 'string' && recipe.id.length >= 20 && !recipe.id.startsWith('local_') && isFirebaseReady && db) {
         try {
           const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, recipe.id);
           await deleteDoc(recipeDocRef);
@@ -712,23 +615,11 @@ export default function CleanPlateCasino() {
 
   // Add recipe to a specific saved menu
   const addToMenu = async (menuId) => {
-    if (!selectedRecipeForMenu || !isAuthReady || !userId || !db) return;
+    if (!selectedRecipeForMenu || !isFirebaseReady || !spaceId || !db) return;
     
     try {
-      const menuDocRef = doc(db, `/artifacts/${appId}/users/${userId}/savedMenus`, menuId);
-      const menuDoc = await getDoc(menuDocRef);
-      
-      if (menuDoc.exists()) {
-        const menuData = menuDoc.data();
-        const recipeId = selectedRecipeForMenu.id || selectedRecipeForMenu.name;
-        
-        // Add recipe if not already in menu
-        if (!menuData.recipeIds.includes(recipeId)) {
-          await updateDoc(menuDocRef, {
-            recipeIds: [...menuData.recipeIds, recipeId]
-          });
-        }
-      }
+      const recipeId = selectedRecipeForMenu.id || selectedRecipeForMenu.name;
+      await addRecipeToMenuInSpace(db, spaceId, menuId, recipeId);
       
       setShowMenuSelector(false);
       setSelectedRecipeForMenu(null);
@@ -749,14 +640,9 @@ export default function CleanPlateCasino() {
     const recipeId = selectedRecipeForMenu.id || selectedRecipeForMenu.name;
     
     // If Firebase is ready, save to Firebase
-    if (isAuthReady && userId && db) {
+    if (isFirebaseReady && spaceId && db) {
       try {
-        const menusCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/savedMenus`);
-        await addDoc(menusCollectionRef, {
-          name: menuName,
-          recipeIds: [recipeId],
-          createdAt: Date.now()
-        });
+        await createMenuForSpace(db, spaceId, menuName, [recipeId]);
         
         // Success - close modal and reset
         setShowMenuSelector(false);
@@ -805,18 +691,13 @@ export default function CleanPlateCasino() {
   });
 
   const saveMenu = async (name) => {
-    if (!isAuthReady || !userId || currentMenuIds.length === 0 || !db) {
-      console.error("Cannot save: Auth not ready or menu is empty.");
+    if (!isFirebaseReady || !spaceId || currentMenuIds.length === 0 || !db) {
+      console.error("Cannot save: Firebase not ready or menu is empty.");
       return;
     }
 
     try {
-      const menusCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/savedMenus`);
-      await addDoc(menusCollectionRef, {
-        name: name,
-        recipeIds: currentMenuIds,
-        createdAt: Date.now()
-      });
+      await createMenuForSpace(db, spaceId, name, currentMenuIds);
       console.log(`Menu "${name}" saved successfully!`);
     } catch (e) {
       console.error("Error saving menu:", e);
@@ -829,11 +710,10 @@ export default function CleanPlateCasino() {
   };
 
   const deleteMenu = async (menuId) => {
-    if (!isAuthReady || !userId || !db) return;
+    if (!isFirebaseReady || !spaceId || !db) return;
     
     try {
-      const menuDocRef = doc(db, `/artifacts/${appId}/users/${userId}/savedMenus`, menuId);
-      await deleteDoc(menuDocRef);
+      await deleteMenuFromSpace(db, spaceId, menuId);
       console.log("Menu deleted.");
     } catch (e) {
       console.error("Error deleting menu:", e);
@@ -846,14 +726,14 @@ export default function CleanPlateCasino() {
       return;
     }
     
-    if (!isAuthReady || !userId || !db) {
+    if (!isFirebaseReady || !spaceId || !db) {
       // Fallback to localStorage
       try {
-        const savedMenusLocal = JSON.parse(localStorage.getItem('cleaneats_savedMenus') || '[]');
+        const savedMenusLocal = loadSavedMenus();
         const updatedMenus = savedMenusLocal.map(menu => 
           menu.id === menuId ? { ...menu, name: newName.trim() } : menu
         );
-        localStorage.setItem('cleaneats_savedMenus', JSON.stringify(updatedMenus));
+        saveSavedMenus(updatedMenus);
         setSavedMenus(updatedMenus);
         setEditingMenuId(null);
         setEditingMenuName('');
@@ -866,8 +746,7 @@ export default function CleanPlateCasino() {
     }
     
     try {
-      const menuDocRef = doc(db, `/artifacts/${appId}/users/${userId}/savedMenus`, menuId);
-      await updateDoc(menuDocRef, { name: newName.trim() });
+      await updateMenuNameInSpace(db, spaceId, menuId, newName.trim());
       // Update local state immediately
       setSavedMenus(prev => prev.map(menu => 
         menu.id === menuId ? { ...menu, name: newName.trim() } : menu
@@ -879,6 +758,76 @@ export default function CleanPlateCasino() {
       console.error("Error updating menu name:", e);
       alert('Failed to update menu name. Please try again.');
     }
+  };
+
+  // Helper function to save recipe notes
+  const handleSaveRecipeNotes = async () => {
+    if (!viewingRecipe || !isFirebaseReady || !db) return;
+    
+    const recipeId = viewingRecipe.id || viewingRecipe.name;
+    
+    // If it's a Firebase recipe, save notes to Firebase
+    if (viewingRecipe.id && typeof viewingRecipe.id === 'string' && viewingRecipe.id.length >= 20 && !viewingRecipe.id.startsWith('local_')) {
+      try {
+        const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, viewingRecipe.id);
+        await updateDoc(recipeDocRef, { notes: recipeNote });
+        // Update local state
+        setRecipes(prevRecipes => prevRecipes.map(r => {
+          const rId = r.id || r.name;
+          return rId === recipeId ? { ...r, notes: recipeNote } : r;
+        }));
+        alert('Notes saved!');
+      } catch (e) {
+        console.error("Error saving notes:", e);
+        alert('Failed to save notes. Please try again.');
+      }
+    } else {
+      // Local recipe - update local state
+      setRecipes(prevRecipes => prevRecipes.map(r => {
+        const rId = r.id || r.name;
+        return rId === recipeId ? { ...r, notes: recipeNote } : r;
+      }));
+      alert('Notes saved!');
+    }
+  };
+
+  // Helper function to handle edit button click
+  const handleEditRecipe = () => {
+    if (!viewingRecipe) return;
+    setViewingRecipe(null);
+    setEditingRecipe(viewingRecipe);
+    setNewDish({
+      name: viewingRecipe.name,
+      cuisine: viewingRecipe.cuisine,
+      protein: viewingRecipe.protein,
+      cals: viewingRecipe.cals.toString(),
+      time: viewingRecipe.time,
+      img: viewingRecipe.img,
+      healthTag: viewingRecipe.healthTag || 'Healthy',
+      freeformTag: viewingRecipe.freeformTag || ''
+    });
+    setImagePreview(null);
+    setImageFile(null);
+    setRecipeNote(viewingRecipe.notes || '');
+    setShowAddForm(true);
+  };
+
+  // Helper function to close add/edit form
+  const handleCloseAddForm = () => {
+    setShowAddForm(false);
+    setEditingRecipe(null);
+    setNewDish({
+      name: '',
+      cuisine: 'Mediterranean',
+      protein: 'Chicken',
+      cals: '',
+      time: '',
+      img: '',
+      healthTag: 'Healthy',
+      freeformTag: ''
+    });
+    setImageFile(null);
+    setImagePreview(null);
   };
 
 
@@ -901,69 +850,6 @@ export default function CleanPlateCasino() {
     return { label: 'Guilty Pleasure', color: 'bg-pink-100 text-pink-700' };
   };
 
-  const RecipeCardSmall = ({ recipe, onAddToMenu, onDelete, onView }) => {
-    // Check if recipe is in any saved menu
-    const recipeId = recipe.id || recipe.name;
-    const isInAnyMenu = savedMenus.some(menu => menu.recipeIds.includes(recipeId));
-    
-    return (
-      <div className="bg-white border border-stone-200 overflow-hidden transition-all hover:border-stone-400 group relative flex flex-col cursor-pointer" onClick={() => onView && onView(recipe)}>
-        {/* Image - Square */}
-        <div className="relative w-full aspect-square overflow-hidden">
-          <img 
-            src={recipe.img} 
-            alt={recipe.name} 
-            className="w-full h-full object-cover transition-opacity duration-300 group-hover:opacity-90" 
-            onError={(e) => { e.target.onerror = null; e.target.src = `https://placehold.co/400x400/f5f5f4/78716c?text=${recipe.name.split(' ').map(n=>n[0]).join('')}`; }}
-          />
-          {/* Heart button overlay - Minimalist */}
-          {onAddToMenu && (
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                onAddToMenu(recipe);
-              }}
-              className={`absolute top-3 right-3 p-1.5 transition-all ${
-                isInAnyMenu 
-                  ? 'text-stone-900' 
-                  : 'text-stone-400 hover:text-stone-900'
-              }`}
-              title="Add to Menu"
-            >
-              <Heart size={18} className={isInAnyMenu ? 'fill-current' : ''} strokeWidth={1.5} />
-            </button>
-          )}
-          {/* Delete button overlay - Minimalist */}
-          {onDelete && (
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(recipe);
-              }}
-              className="absolute top-3 left-3 p-1.5 text-stone-400 hover:text-stone-900 transition-colors"
-              title="Delete Dish"
-            >
-              <Trash2 size={16} strokeWidth={1.5} />
-            </button>
-          )}
-        </div>
-        
-        {/* Content - Minimalist */}
-        <div className="p-4 flex-1 flex flex-col border-t border-stone-100">
-          <h4 className="font-light text-stone-900 text-base mb-3 line-clamp-2 tracking-wide">{recipe.name}</h4>
-          
-          {/* Details - Minimalist */}
-          <div className="flex items-center gap-3 text-xs text-stone-500 uppercase tracking-wider mt-auto">
-            <span>{recipe.cuisine}</span>
-            <span className="text-stone-300">•</span>
-            <span>{recipe.protein}</span>
-            <span className="text-stone-300">•</span>
-            <span>{recipe.time}</span>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
 
   // --- RENDER: MENU MANAGER VIEW ---
@@ -975,9 +861,10 @@ export default function CleanPlateCasino() {
       <div className="min-h-screen bg-white pb-32">
         <div className="bg-white p-8 sticky top-0 z-10 border-b border-stone-200">
           <div className="text-center">
-            <h2 className="text-3xl font-light text-stone-900 tracking-wider uppercase mb-2">My Menus</h2>
-            <div className="text-xs text-stone-500 uppercase tracking-widest">
-              {savedMenus.length} {savedMenus.length === 1 ? 'Menu' : 'Menus'}
+            <div className="flex items-center justify-center gap-4 mb-2">
+              <h2 className="text-3xl font-light text-stone-900 tracking-wider uppercase">
+                {spaceName ? `${spaceName}'s Menu` : 'My Menus'}
+              </h2>
             </div>
           </div>
         </div>
@@ -1027,7 +914,7 @@ export default function CleanPlateCasino() {
                     {currentMenuRecipes.map((recipe, index) => {
                       const recipeId = recipe.id || recipe.name || index;
                       return (
-                        <RecipeCardSmall
+                        <RecipeCard
                           key={recipeId}
                           recipe={recipe}
                           onAddToMenu={null}
@@ -1035,6 +922,7 @@ export default function CleanPlateCasino() {
                             const id = r.id || r.name;
                             setCurrentMenuIds(currentMenuIds.filter(did => did !== id));
                           }}
+                          savedMenus={savedMenus}
                         />
                       );
                     })}
@@ -1086,7 +974,7 @@ export default function CleanPlateCasino() {
               </h3>
             </div>
             
-            {!isAuthReady && <p className="text-center text-stone-400 text-sm uppercase tracking-wider">Connecting to storage...</p>}
+            {!isFirebaseReady && <p className="text-center text-stone-400 text-sm uppercase tracking-wider">Connecting to storage...</p>}
 
             {savedMenus.length === 0 ? (
               <p className="text-center text-stone-400 text-sm">No saved menus yet. Save your first menu above.</p>
@@ -1180,116 +1068,33 @@ export default function CleanPlateCasino() {
           </div>
         </div>
         
-        {/* Restaurant Menu Display Modal - Minimalist Japanese Style */}
-        {viewingMenu && (
-          <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
-            <div className="max-w-3xl w-full mx-auto px-6 py-12 pb-32">
-              {/* Toggle and Close Button - Top */}
-              <div className="flex justify-between items-center mb-8">
-                <button
-                  onClick={() => setShowCalories(!showCalories)}
-                  className="text-stone-400 hover:text-stone-900 text-xs uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
-                >
-                  {showCalories ? 'Hide Calories' : 'Show Calories'}
-                </button>
-                <button
-                  onClick={() => {
-                    loadMenu(viewingMenu.recipeIds);
-                    setViewingMenu(null);
-                    setShowCalories(true); // Reset to default when closing
-                  }}
-                  className="text-stone-400 hover:text-stone-800 transition-colors p-2"
-                  aria-label="Close"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              {/* Menu Header - Minimalist */}
-              <div className="text-center mb-16 border-b border-stone-200 pb-8">
-                <h2 className="text-4xl font-light tracking-wider text-stone-900 mb-3 uppercase letter-spacing-wider">
-                  {viewingMenu.name}
-                </h2>
-                <div className="text-xs text-stone-500 tracking-widest uppercase">
-                  {viewingMenu.recipeIds.length} {viewingMenu.recipeIds.length === 1 ? 'Dish' : 'Dishes'}
-                </div>
-              </div>
-              
-              {/* Menu Items - Clean Lines */}
-              <div className="space-y-12 mb-16">
-                {recipes
-                  .filter(r => {
-                    const recipeId = r.id || r.name;
-                    return viewingMenu.recipeIds.includes(recipeId);
-                  })
-                  .map((recipe, index) => {
-                    return (
-                      <div key={recipe.id || recipe.name || index} className="border-b border-stone-100 pb-8 last:border-0 last:pb-0">
-                        <div className="flex items-start justify-between gap-8">
-                          {/* Left: Number, Name and Details */}
-                          <div className="flex-1 flex items-start gap-4">
-                            <span className="text-stone-400 text-xl font-light tracking-wide mt-1">
-                              {index + 1}
-                            </span>
-                            <div className="flex-1">
-                              <h3 className="text-2xl font-light text-stone-900 mb-2 tracking-wide">
-                                {recipe.name}
-                              </h3>
-                              <div className="flex items-center gap-4 text-xs text-stone-500 uppercase tracking-wider mt-3">
-                                <span>{recipe.cuisine}</span>
-                                <span className="text-stone-300">•</span>
-                                <span>{recipe.protein}</span>
-                                <span className="text-stone-300">•</span>
-                                <span>{recipe.time}</span>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* Right: Calories - Minimalist (conditionally shown) */}
-                          {showCalories && (
-                            <div className="text-right">
-                              <div className="text-xl font-light text-stone-700 tracking-wide">
-                                {recipe.cals}
-                              </div>
-                              <div className="text-[10px] text-stone-400 uppercase tracking-widest mt-1">
-                                kcal
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-              
-              {/* Menu Footer - Subtle */}
-              <div className="border-t border-stone-200 pt-8 text-center">
-                {showCalories && (
-                  <div className="mb-6">
-                    <div className="text-xs text-stone-400 uppercase tracking-widest mb-2">Total</div>
-                    <div className="text-3xl font-light text-stone-900 tracking-wide">
-                      {recipes.filter(r => {
-                        const recipeId = r.id || r.name;
-                        return viewingMenu.recipeIds.includes(recipeId);
-                      }).reduce((sum, r) => sum + r.cals, 0)}
-                      <span className="text-lg text-stone-500 ml-2">kcal</span>
-                    </div>
-                  </div>
-                )}
-                <button
-                  onClick={() => {
-                    loadMenu(viewingMenu.recipeIds);
-                    setViewingMenu(null);
-                    setShowCalories(true); // Reset to default when closing
-                  }}
-                  className="text-stone-600 hover:text-stone-900 text-sm uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Restaurant Menu Display Modal */}
+        <MenuDisplayModal
+          isOpen={!!viewingMenu}
+          menu={viewingMenu}
+          recipes={recipes}
+          showCalories={showCalories}
+          onToggleCalories={() => setShowCalories(!showCalories)}
+          onClose={() => {
+            setViewingMenu(null);
+            setShowCalories(true);
+          }}
+          onLoadMenu={(recipeIds) => {
+            loadMenu(recipeIds);
+            setViewingMenu(null);
+            setShowCalories(true);
+          }}
+        />
+        
+        {/* Space Selector Modal */}
+        <MenuJoinModal
+          isOpen={showSpaceSelector}
+          onClose={() => setShowSpaceSelector(false)}
+          onCreateSpace={handleCreateSpace}
+          onJoinSpace={handleJoinSpace}
+          currentSpaceId={spaceId}
+          currentSpaceName={spaceName}
+        />
       </div>
     );
   };
@@ -1326,10 +1131,10 @@ export default function CleanPlateCasino() {
         }`}>
           <div className="flex items-center justify-between mb-8">
             <div>
-              <h2 className="text-3xl font-light text-stone-900 tracking-wider uppercase mb-2">Browse</h2>
-              <div className="text-xs text-stone-500 uppercase tracking-widest">
-                {filteredRecipes.length} {filteredRecipes.length === 1 ? 'Recipe' : 'Recipes'}
+              <div className="flex items-center gap-4 mb-2">
+                <h2 className="text-3xl font-light text-stone-900 tracking-wider uppercase">Browse</h2>
               </div>
+              {/* Intentionally minimal header: no count or inline space code */}
             </div>
             <button
               onClick={() => setShowAddForm(true)}
@@ -1392,7 +1197,7 @@ export default function CleanPlateCasino() {
             {filteredRecipes.map((recipe, index) => {
               const recipeId = recipe.id || recipe.name || index;
               return (
-                <RecipeCardSmall
+                <RecipeCard
                   key={recipeId}
                   recipe={recipe}
                   onAddToMenu={openMenuSelector}
@@ -1401,6 +1206,7 @@ export default function CleanPlateCasino() {
                     setViewingRecipe(recipe);
                     setRecipeNote(recipe.notes || '');
                   }}
+                  savedMenus={savedMenus}
                 />
               );
             })}
@@ -1424,498 +1230,164 @@ export default function CleanPlateCasino() {
           )}
         </div>
 
-        {/* Menu Selector Modal - Minimalist */}
-        {showMenuSelector && (
-          <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
-            <div className="max-w-md w-full mx-auto px-4 py-12 pb-32">
-              <div className="flex justify-end mb-8">
-                <button
-                  onClick={() => {
-                    setShowMenuSelector(false);
-                    setSelectedRecipeForMenu(null);
-                  }}
-                  className="text-stone-400 hover:text-stone-900 transition-colors p-2"
-                  aria-label="Close"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-              
-              <div className="text-center mb-12 border-b border-stone-200 pb-8">
-                <h3 className="text-2xl font-light text-stone-900 tracking-wide uppercase mb-2">Add to Menu</h3>
-                {selectedRecipeForMenu && (
-                  <p className="text-sm text-stone-500 uppercase tracking-wider mt-2">
-                    {selectedRecipeForMenu.name}
-                  </p>
-                )}
-              </div>
+        {/* Menu Selector Modal */}
+        <MenuSelectorModal
+          isOpen={showMenuSelector}
+          onClose={() => {
+            setShowMenuSelector(false);
+            setSelectedRecipeForMenu(null);
+          }}
+          selectedRecipe={selectedRecipeForMenu}
+          savedMenus={savedMenus}
+          templateName={templateName}
+          onTemplateNameChange={setTemplateName}
+          onAddToMenu={addToMenu}
+          onCreateMenuAndAdd={createMenuAndAdd}
+        />
 
-              <div className="space-y-4 max-h-64 overflow-y-auto mb-8">
-                {savedMenus.length === 0 ? (
-                  <p className="text-stone-400 text-sm text-center py-8">
-                    No menus yet. Create one below.
-                  </p>
-                ) : (
-                  savedMenus.map(menu => {
-                    const recipeId = selectedRecipeForMenu?.id || selectedRecipeForMenu?.name;
-                    const isAlreadyInMenu = menu.recipeIds.includes(recipeId);
-                    
-                    return (
-                      <button
-                        key={menu.id}
-                        onClick={() => !isAlreadyInMenu && addToMenu(menu.id)}
-                        disabled={isAlreadyInMenu}
-                        className={`w-full p-4 text-left border-b border-stone-100 transition-colors ${
-                          isAlreadyInMenu
-                            ? 'text-stone-300 cursor-not-allowed'
-                            : 'text-stone-900 hover:text-stone-600'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-light text-lg tracking-wide mb-1">{menu.name}</p>
-                            <p className="text-xs text-stone-500 uppercase tracking-wider">{menu.recipeIds.length} dishes</p>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
+        {/* Recipe Detail Modal */}
+        <RecipeDetailModal
+          isOpen={!!viewingRecipe}
+          recipe={viewingRecipe}
+          recipeNote={recipeNote}
+          onRecipeNoteChange={setRecipeNote}
+          onClose={() => {
+            setViewingRecipe(null);
+            setRecipeNote('');
+          }}
+          onEdit={handleEditRecipe}
+          onSaveNotes={handleSaveRecipeNotes}
+          isAuthReady={isFirebaseReady}
+          db={db}
+        />
 
-              <div className="border-t border-stone-200 pt-8">
-                <p className="text-xs text-stone-500 uppercase tracking-widest mb-4 text-center">Or create a new menu</p>
-                <div className="flex gap-3">
-                  <input
-                    type="text"
-                    placeholder="Menu name (optional)"
-                    value={templateName}
-                    onChange={(e) => setTemplateName(e.target.value)}
-                    className="flex-1 p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none text-sm bg-transparent"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        createMenuAndAdd();
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={createMenuAndAdd}
-                    className="text-stone-600 hover:text-stone-900 text-sm uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1 disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    Create
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Recipe Detail Modal - Minimalist */}
-        {viewingRecipe && (
-          <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
-            <div className="max-w-2xl w-full mx-auto px-4 py-12 pb-32">
-              <div className="flex justify-end mb-8">
-                <button
-                  onClick={() => {
-                    setViewingRecipe(null);
-                    setRecipeNote('');
-                  }}
-                  className="text-stone-400 hover:text-stone-900 transition-colors p-2"
-                  aria-label="Close"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-              
-              {/* Recipe Image */}
-              <div className="mb-8">
-                <img 
-                  src={viewingRecipe.img} 
-                  alt={viewingRecipe.name}
-                  className="w-full h-64 object-cover border border-stone-200"
-                  onError={(e) => { 
-                    e.target.onerror = null; 
-                    e.target.src = `https://placehold.co/800x400/f5f5f4/78716c?text=${viewingRecipe.name.split(' ').map(n=>n[0]).join('')}`; 
-                  }}
-                />
-              </div>
-              
-              {/* Recipe Header */}
-              <div className="text-center mb-12 border-b border-stone-200 pb-8">
-                <h2 className="text-4xl font-light text-stone-900 tracking-wider uppercase mb-4">
-                  {viewingRecipe.name}
-                </h2>
-                <div className="flex items-center justify-center gap-4 text-xs text-stone-500 uppercase tracking-wider">
-                  <span>{viewingRecipe.cuisine}</span>
-                  <span className="text-stone-300">•</span>
-                  <span>{viewingRecipe.protein}</span>
-                  <span className="text-stone-300">•</span>
-                  <span>{viewingRecipe.time}</span>
-                </div>
-              </div>
-              
-              {/* Recipe Details */}
-              <div className="space-y-8 mb-12">
-                <div className="flex items-start justify-between border-b border-stone-100 pb-6">
-                  <div>
-                    <div className="text-xs text-stone-400 uppercase tracking-widest mb-2">Calories</div>
-                    <div className="text-3xl font-light text-stone-900 tracking-wide">
-                      {viewingRecipe.cals}
-                      <span className="text-lg text-stone-500 ml-2">kcal</span>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Tags */}
-                <div className="border-b border-stone-100 pb-6">
-                  <div className="text-xs text-stone-400 uppercase tracking-widest mb-4">Tags</div>
-                  <div className="space-y-3">
-                    <div>
-                      <div className="text-[10px] text-stone-400 uppercase tracking-widest mb-2">Cuisine</div>
-                      <div className="flex flex-wrap gap-3">
-                        <span className="bg-stone-100 text-stone-600 px-3 py-1.5 rounded text-xs font-light tracking-wide">
-                          {viewingRecipe.cuisine}
-                        </span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-stone-400 uppercase tracking-widest mb-2">Protein</div>
-                      <div className="flex flex-wrap gap-3">
-                        <span className="bg-stone-100 text-stone-600 px-3 py-1.5 rounded text-xs font-light tracking-wide">
-                          {viewingRecipe.protein}
-                        </span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-stone-400 uppercase tracking-widest mb-2">Health Level</div>
-                      <div className="flex flex-wrap gap-3">
-                        {(() => {
-                          const healthTag = getHealthTag(viewingRecipe.cals || 0, viewingRecipe.healthTag);
-                          return (
-                            <span className={`${healthTag.color} px-3 py-1.5 rounded text-xs font-light tracking-wide`}>
-                              {healthTag.label}
-                            </span>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                    {viewingRecipe.freeformTag && (
-                      <div>
-                        <div className="text-[10px] text-stone-400 uppercase tracking-widest mb-2">Custom Tags</div>
-                        <div className="flex flex-wrap gap-3">
-                          <span className="bg-stone-100 text-stone-600 px-3 py-1.5 rounded text-xs font-light tracking-wide">
-                            {viewingRecipe.freeformTag}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Notes Section */}
-                <div className="border-b border-stone-100 pb-6">
-                  <div className="text-xs text-stone-400 uppercase tracking-widest mb-4">Recipe Notes</div>
-                  <textarea
-                    value={recipeNote}
-                    onChange={(e) => setRecipeNote(e.target.value)}
-                    placeholder="Add your recipe notes, ingredients, instructions, or any other details here..."
-                    className="w-full p-4 border border-stone-200 focus:border-stone-900 focus:outline-none bg-transparent resize-none font-light text-stone-900 leading-relaxed min-h-[200px]"
-                    rows={8}
-                  />
-                  <button
-                    onClick={async () => {
-                      if (!viewingRecipe || !isAuthReady || !db) return;
-                      
-                      const recipeId = viewingRecipe.id || viewingRecipe.name;
-                      
-                      // If it's a Firebase recipe, save notes to Firebase
-                      if (viewingRecipe.id && typeof viewingRecipe.id === 'string' && viewingRecipe.id.length >= 20 && !viewingRecipe.id.startsWith('local_')) {
-                        try {
-                          const recipeDocRef = doc(db, `/artifacts/${appId}/sharedRecipes`, viewingRecipe.id);
-                          await updateDoc(recipeDocRef, { notes: recipeNote });
-                          // Update local state
-                          setRecipes(prevRecipes => prevRecipes.map(r => {
-                            const rId = r.id || r.name;
-                            return rId === recipeId ? { ...r, notes: recipeNote } : r;
-                          }));
-                          alert('Notes saved!');
-                        } catch (e) {
-                          console.error("Error saving notes:", e);
-                          alert('Failed to save notes. Please try again.');
-                        }
-                      } else {
-                        // Local recipe - update local state
-                        setRecipes(prevRecipes => prevRecipes.map(r => {
-                          const rId = r.id || r.name;
-                          return rId === recipeId ? { ...r, notes: recipeNote } : r;
-                        }));
-                        alert('Notes saved!');
-                      }
-                    }}
-                    className="mt-4 text-stone-900 hover:text-stone-600 text-sm uppercase tracking-widest border-b border-stone-900 hover:border-stone-600 transition-colors pb-1"
-                  >
-                    Save Notes
-                  </button>
-                </div>
-              </div>
-              
-              {/* Action Buttons */}
-              <div className="flex gap-4 border-t border-stone-200 pt-8 pb-8">
-                <button
-                  onClick={() => {
-                    setViewingRecipe(null);
-                    setEditingRecipe(viewingRecipe);
-                    setNewDish({
-                      name: viewingRecipe.name,
-                      cuisine: viewingRecipe.cuisine,
-                      protein: viewingRecipe.protein,
-                      cals: viewingRecipe.cals.toString(),
-                      time: viewingRecipe.time,
-                      img: viewingRecipe.img,
-                      healthTag: viewingRecipe.healthTag || 'Healthy',
-                      freeformTag: viewingRecipe.freeformTag || ''
-                    });
-                    setImagePreview(null);
-                    setImageFile(null);
-                    setRecipeNote(viewingRecipe.notes || '');
-                    setShowAddForm(true);
-                  }}
-                  className="flex-1 text-stone-900 hover:text-stone-600 text-sm uppercase tracking-widest border-b border-stone-900 hover:border-stone-600 transition-colors pb-1 flex items-center justify-center gap-2"
-                >
-                  <Pencil size={16} strokeWidth={1.5} />
-                  Edit
-                </button>
-                <button
-                  onClick={() => setViewingRecipe(null)}
-                  className="flex-1 text-stone-600 hover:text-stone-900 text-sm uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Add/Edit Dish Modal - Minimalist */}
-        {showAddForm && (
-          <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
-            <div className="max-w-md w-full mx-auto px-4 py-12 pb-32">
-              <div className="flex justify-end mb-8">
-                <button
-                  onClick={() => {
-                    setShowAddForm(false);
-                    setEditingRecipe(null);
-                    setNewDish({
-                      name: '',
-                      cuisine: 'Mediterranean',
-                      protein: 'Chicken',
-                      cals: '',
-                      time: '',
-                      img: '',
-                      healthTag: 'Healthy',
-                      freeformTag: ''
-                    });
-                    setImageFile(null);
-                    setImagePreview(null);
-                  }}
-                  className="text-stone-400 hover:text-stone-900 transition-colors p-2"
-                  aria-label="Close"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-              
-              <div className="text-center mb-12 border-b border-stone-200 pb-8">
-                <h3 className="text-2xl font-light text-stone-900 tracking-wide uppercase">
-                  {editingRecipe ? 'Edit Dish' : 'Add New Dish'}
-                </h3>
-              </div>
-              
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Dish Name</label>
-                  <input
-                    type="text"
-                    value={newDish.name}
-                    onChange={(e) => setNewDish({...newDish, name: e.target.value})}
-                    placeholder="e.g., Grilled Salmon"
-                    className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Cuisine</label>
-                    <select
-                      value={newDish.cuisine}
-                      onChange={(e) => setNewDish({...newDish, cuisine: e.target.value})}
-                      className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent appearance-none"
-                    >
-                      {CUISINES.filter(c => c !== 'All').map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Protein</label>
-                    <select
-                      value={newDish.protein}
-                      onChange={(e) => setNewDish({...newDish, protein: e.target.value})}
-                      className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent appearance-none"
-                    >
-                      {PROTEINS.filter(p => p !== 'All').map(p => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Calories</label>
-                    <input
-                      type="number"
-                      value={newDish.cals}
-                      onChange={(e) => setNewDish({...newDish, cals: e.target.value})}
-                      placeholder="320"
-                      className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Prep Time</label>
-                    <input
-                      type="text"
-                      value={newDish.time}
-                      onChange={(e) => setNewDish({...newDish, time: e.target.value})}
-                      placeholder="25m"
-                      className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Health Level</label>
-                    <select
-                      value={newDish.healthTag}
-                      onChange={(e) => setNewDish({...newDish, healthTag: e.target.value})}
-                      className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent appearance-none"
-                    >
-                      <option value="Healthy">Healthy</option>
-                      <option value="Moderate Healthy">Moderate Healthy</option>
-                      <option value="Guilty Pleasure">Guilty Pleasure</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Custom Tags</label>
-                    <input
-                      type="text"
-                      value={newDish.freeformTag}
-                      onChange={(e) => setNewDish({...newDish, freeformTag: e.target.value})}
-                      placeholder="e.g., Quick, Spicy, Vegan"
-                      className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Image</label>
-                  
-                  {(imagePreview || (editingRecipe && editingRecipe.img && !imagePreview && (newDish.img || newDish.img === editingRecipe.img))) ? (
-                    <div className="relative">
-                      <img 
-                        src={imagePreview || newDish.img || editingRecipe?.img} 
-                        alt="Preview" 
-                        className="w-full h-48 object-cover border border-stone-200"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleRemoveImage}
-                        className="absolute top-3 right-3 text-stone-400 hover:text-stone-900 transition-colors p-1"
-                        title="Remove image"
-                      >
-                        <X size={16} strokeWidth={1.5} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <label className="flex flex-col items-center justify-center w-full h-32 border border-stone-300 cursor-pointer hover:border-stone-900 transition-colors">
-                        <div className="flex flex-col items-center justify-center">
-                          <p className="text-xs text-stone-500 uppercase tracking-wider mb-1">Click to upload</p>
-                          <p className="text-xs text-stone-400">PNG, JPG, GIF</p>
-                        </div>
-                        <input 
-                          type="file" 
-                          className="hidden" 
-                          accept="image/*"
-                          onChange={handleImageSelect}
-                        />
-                      </label>
-                      
-                      <div className="relative">
-                        <div className="absolute inset-0 flex items-center">
-                          <div className="w-full border-t border-stone-200"></div>
-                        </div>
-                        <div className="relative flex justify-center text-xs uppercase">
-                          <span className="bg-white px-2 text-stone-400">Or</span>
-                        </div>
-                      </div>
-                      
-                      <input
-                        type="url"
-                        value={newDish.img}
-                        onChange={(e) => setNewDish({...newDish, img: e.target.value})}
-                        placeholder="Enter image URL..."
-                        className="w-full p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none bg-transparent"
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-4 mt-12 border-t border-stone-200 pt-8">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAddForm(false);
-                    setEditingRecipe(null);
-                    setNewDish({
-                      name: '',
-                      cuisine: 'Mediterranean',
-                      protein: 'Chicken',
-                      cals: '',
-                      time: '',
-                      img: '',
-                      healthTag: 'Healthy',
-                      freeformTag: ''
-                    });
-                    setImageFile(null);
-                    setImagePreview(null);
-                  }}
-                  className="flex-1 text-stone-600 hover:text-stone-900 text-sm uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleAddDish}
-                  className="flex-1 text-stone-900 hover:text-stone-600 text-sm uppercase tracking-widest border-b border-stone-900 hover:border-stone-600 transition-colors pb-1"
-                >
-                  {editingRecipe ? 'Save Changes' : 'Add Dish'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Add/Edit Dish Modal */}
+        <AddEditDishModal
+          isOpen={showAddForm}
+          onClose={handleCloseAddForm}
+          editingRecipe={editingRecipe}
+          newDish={newDish}
+          onNewDishChange={setNewDish}
+          imagePreview={imagePreview}
+          onImageSelect={handleImageSelect}
+          onRemoveImage={handleRemoveImage}
+          onSubmit={handleAddDish}
+        />
+        
+        {/* Space Selector Modal */}
+        <MenuJoinModal
+          isOpen={showSpaceSelector}
+          onClose={() => setShowSpaceSelector(false)}
+          onCreateSpace={handleCreateSpace}
+          onJoinSpace={handleJoinSpace}
+          currentSpaceId={spaceId}
+          currentSpaceName={spaceName}
+        />
       </div>
     );
   };
 
 
+  // Space management handlers
+  const handleCreateSpace = async (name) => {
+    if (!db) {
+      alert('Firebase not initialized. Please refresh the page.');
+      return;
+    }
+    
+    try {
+      // Format display name as UPPERCASE with hyphens
+      const raw = (name && name.trim()) || 'My Space';
+      let displayName = raw
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '-')   // non-alphanumeric -> hyphen
+        .replace(/^-+|-+$/g, '')       // trim leading/trailing hyphens
+        .slice(0, 24);
+      if (!displayName) {
+        displayName = 'MY-SPACE';
+      }
+
+      const newSpaceId = await createSpace(db, displayName);
+      setSpaceId(newSpaceId);
+      setSpaceName(displayName);
+      setShowSpaceSelector(false);
+    } catch (e) {
+      console.error("Error creating space:", e);
+      let errorMessage = 'Failed to create space. Please try again.';
+      
+      // Provide more specific error messages
+      if (e.code === 'permission-denied') {
+        errorMessage = 'Permission denied. Please deploy Firestore rules to Firebase Console.\n\nGo to: Firebase Console → Firestore → Rules → Paste firestore.rules → Publish';
+      } else if (e.message) {
+        errorMessage = `Error: ${e.message}`;
+      }
+      
+      alert(errorMessage + '\n\nOpening in local-only mode so you can continue.');
+      // Local fallback: create a temporary local space so the app can proceed
+      try {
+        const fallbackId = `local_${Date.now().toString(36)}`;
+        setCurrentSpaceId(fallbackId);
+        setSpaceId(fallbackId);
+        setSpaceName(raw?.toUpperCase?.() || 'MY-SPACE');
+        setShowSpaceSelector(false);
+      } catch (fallbackError) {
+        console.error('Local fallback failed:', fallbackError);
+      }
+    }
+  };
+
+  const handleJoinSpace = async (spaceIdToJoin) => {
+    if (!spaceIdToJoin) {
+      // Leave current space
+      setCurrentSpaceId(null);
+      setSpaceId(null);
+      setSpaceName('');
+      setCurrentMenuIds([]);
+      setSavedMenus([]);
+      setShowSpaceSelector(true);
+      return;
+    }
+    
+    if (!db) {
+      alert('Firebase not initialized. Please refresh the page.');
+      return;
+    }
+    
+    try {
+      const success = await joinSpace(db, spaceIdToJoin);
+      if (success) {
+        setSpaceId(spaceIdToJoin);
+        try {
+          const space = await getSpace(db, spaceIdToJoin);
+          if (space && space.name) {
+            setSpaceName(space.name);
+          } else {
+            setSpaceName('');
+          }
+        } catch (e) {
+          console.error('Error loading space name after join:', e);
+          setSpaceName('');
+        }
+        setShowSpaceSelector(false);
+      } else {
+        alert('Space not found. Please check the code and try again.');
+      }
+    } catch (e) {
+      console.error("Error joining space:", e);
+      let errorMessage = 'Failed to join space. Please try again.';
+      
+      if (e.code === 'permission-denied') {
+        errorMessage = 'Permission denied. Please deploy Firestore rules to Firebase Console.\n\nGo to: Firebase Console → Firestore → Rules → Paste firestore.rules → Publish';
+      } else if (e.message) {
+        errorMessage = `Error: ${e.message}`;
+      }
+      
+      alert(errorMessage);
+    }
+  };
+
   // --- RENDER: PRIMARY VIEW ROUTING ---
-  if (!isAuthReady) {
+  if (!isFirebaseReady) {
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-stone-400">
         <Loader2 className="w-6 h-6 animate-spin text-stone-900 mb-4" strokeWidth={1.5} />
@@ -1924,12 +1396,30 @@ export default function CleanPlateCasino() {
     );
   }
 
+  // Show space selector if no space is selected
+  if (showSpaceSelector || !spaceId) {
+    return (
+      <MenuJoinModal
+        isOpen={true}
+        onClose={() => {
+          // Don't allow closing if no space is selected
+          if (!spaceId) return;
+          setShowSpaceSelector(false);
+        }}
+        onCreateSpace={handleCreateSpace}
+        onJoinSpace={handleJoinSpace}
+        currentSpaceId={spaceId}
+      />
+    );
+  }
+
   // --- RENDER: TAB NAVIGATION ---
   const renderTabs = () => {
     const tabs = [
       { id: 'spin', label: 'Spin', icon: RefreshCw },
       { id: 'browse', label: 'Browse', icon: BookOpen },
-      { id: 'menus', label: 'Menus', icon: List, badge: currentMenuCount }
+      { id: 'menus', label: 'Menus', icon: List, badge: currentMenuCount },
+      { id: 'space', label: 'Space', icon: Copy }
     ];
 
     return (
@@ -1941,7 +1431,13 @@ export default function CleanPlateCasino() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setView(tab.id)}
+                onClick={() => {
+                  if (tab.id === 'space') {
+                    setShowSpaceSelector(true);
+                    return;
+                  }
+                  setView(tab.id);
+                }}
                 className={`flex flex-col items-center justify-center gap-1 px-4 py-2 transition-all relative ${
                   isActive 
                     ? 'text-stone-900' 
@@ -1975,8 +1471,9 @@ export default function CleanPlateCasino() {
       {/* Top Bar */}
       <div className="px-8 pt-8 pb-4">
         <div className="text-center">
-          <h1 className="text-3xl font-light text-stone-900 tracking-wider uppercase mb-2">Clean Eats</h1>
-          <p className="text-xs text-stone-500 uppercase tracking-widest">Randomizer</p>
+          <div className="flex items-center justify-center gap-4">
+            <h1 className="text-3xl font-light text-stone-900 tracking-wider uppercase">Clean Eats</h1>
+          </div>
         </div>
       </div>
 
@@ -2060,31 +1557,6 @@ export default function CleanPlateCasino() {
         {/* Controls */}
         <div className="w-full max-w-md space-y-4">
           
-          {/* Lock Filters */}
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div>
-              <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Cuisine</label>
-              <select 
-                value={lockCuisine} 
-                onChange={(e) => setLockCuisine(e.target.value)}
-                className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
-              >
-                {CUISINES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-xs text-stone-500 uppercase tracking-widest mb-2">Protein</label>
-              <select 
-                value={lockProtein} 
-                onChange={(e) => setLockProtein(e.target.value)}
-                className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
-              >
-                {PROTEINS.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-          </div>
-
           {/* Action Buttons */}
           <div className="flex gap-4 mb-4">
             <button 
@@ -2098,111 +1570,39 @@ export default function CleanPlateCasino() {
             <button 
               onClick={handleSwipeLike}
               disabled={isSpinning}
-              className="flex-1 text-stone-900 hover:text-stone-600 text-sm uppercase tracking-widest border-b border-stone-900 hover:border-stone-600 transition-colors pb-2 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="flex-1 text-stone-900 hover:text-stone-600 text-sm uppercase tracking-widest border-b border-stone-900 hover-border-stone-600 transition-colors pb-2 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <Heart size={18} strokeWidth={1.5} />
               Like
             </button>
           </div>
           
-          {/* Spin Button (Alternative) */}
-          <button 
-            onClick={handleSpin}
-            disabled={isSpinning}
-            className="w-full text-stone-500 hover:text-stone-900 text-xs uppercase tracking-widest border-b border-stone-200 hover:border-stone-900 transition-colors pb-2 flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <RefreshCw size={16} className={isSpinning ? 'animate-spin' : ''} strokeWidth={1.5} />
-            {isSpinning ? "Finding..." : "Skip to Next"}
-          </button>
-          
         </div>
       </div>
       
-      {/* Menu Selector Modal - Minimalist */}
-      {showMenuSelector && (
-        <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
-          <div className="max-w-md w-full mx-auto px-4 py-12 pb-32">
-            <div className="flex justify-end mb-8">
-              <button
-                onClick={() => {
-                  setShowMenuSelector(false);
-                  setSelectedRecipeForMenu(null);
-                }}
-                className="text-stone-400 hover:text-stone-900 transition-colors p-2"
-                aria-label="Close"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="text-center mb-12 border-b border-stone-200 pb-8">
-              <h3 className="text-2xl font-light text-stone-900 tracking-wide uppercase mb-2">Add to Menu</h3>
-              {selectedRecipeForMenu && (
-                <p className="text-sm text-stone-500 uppercase tracking-wider mt-2">
-                  {selectedRecipeForMenu.name}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-4 max-h-64 overflow-y-auto mb-8">
-              {savedMenus.length === 0 ? (
-                <p className="text-stone-400 text-sm text-center py-8">
-                  No menus yet. Create one below.
-                </p>
-              ) : (
-                savedMenus.map(menu => {
-                  const recipeId = selectedRecipeForMenu?.id || selectedRecipeForMenu?.name;
-                  const isAlreadyInMenu = menu.recipeIds.includes(recipeId);
-                  
-                  return (
-                    <button
-                      key={menu.id}
-                      onClick={() => !isAlreadyInMenu && addToMenu(menu.id)}
-                      disabled={isAlreadyInMenu}
-                      className={`w-full p-4 text-left border-b border-stone-100 transition-colors ${
-                        isAlreadyInMenu
-                          ? 'text-stone-300 cursor-not-allowed'
-                          : 'text-stone-900 hover:text-stone-600'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-light text-lg tracking-wide mb-1">{menu.name}</p>
-                          <p className="text-xs text-stone-500 uppercase tracking-wider">{menu.recipeIds.length} dishes</p>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-
-            <div className="border-t border-stone-200 pt-8">
-              <p className="text-xs text-stone-500 uppercase tracking-widest mb-4 text-center">Or create a new menu</p>
-              <div className="flex gap-3">
-                <input
-                  type="text"
-                  placeholder="Menu name (optional)"
-                  value={templateName}
-                  onChange={(e) => setTemplateName(e.target.value)}
-                  className="flex-1 p-3 border-b border-stone-300 focus:border-stone-900 focus:outline-none text-sm bg-transparent"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      createMenuAndAdd();
-                    }
-                  }}
-                />
-                <button
-                  onClick={createMenuAndAdd}
-                  className="text-stone-600 hover:text-stone-900 text-sm uppercase tracking-widest border-b border-stone-300 hover:border-stone-900 transition-colors pb-1 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  Create
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Menu Selector Modal */}
+      <MenuSelectorModal
+        isOpen={showMenuSelector}
+        onClose={() => {
+          setShowMenuSelector(false);
+          setSelectedRecipeForMenu(null);
+        }}
+        selectedRecipe={selectedRecipeForMenu}
+        savedMenus={savedMenus}
+        templateName={templateName}
+        onTemplateNameChange={setTemplateName}
+        onAddToMenu={addToMenu}
+        onCreateMenuAndAdd={createMenuAndAdd}
+      />
+      
+      {/* Space Selector Modal */}
+      <MenuJoinModal
+        isOpen={showSpaceSelector}
+        onClose={() => setShowSpaceSelector(false)}
+        onCreateSpace={handleCreateSpace}
+        onJoinSpace={handleJoinSpace}
+        currentSpaceId={spaceId}
+      />
       
       {/* Tab Navigation */}
       {renderTabs()}

@@ -10,9 +10,12 @@ export const RecipeCard = ({
   onAddToMenu, 
   onDelete, 
   onView,
-  isInAnyMenu = false 
+  isInAnyMenu = false,
+  savedMenus = []
 }) => {
   const recipeId = recipe.id || recipe.name;
+  // Check if recipe is in any saved menu if isInAnyMenu not explicitly provided
+  const isInMenu = isInAnyMenu !== false ? isInAnyMenu : savedMenus.some(menu => menu.recipeIds.includes(recipeId));
   
   return (
     <div 
@@ -38,13 +41,13 @@ export const RecipeCard = ({
               onAddToMenu(recipe);
             }}
             className={`absolute top-3 right-3 p-1.5 transition-all ${
-              isInAnyMenu 
+              isInMenu 
                 ? 'text-stone-900' 
                 : 'text-stone-400 hover:text-stone-900'
             }`}
             title="Add to Menu"
           >
-            <Heart size={18} className={isInAnyMenu ? 'fill-current' : ''} strokeWidth={1.5} />
+            <Heart size={18} className={isInMenu ? 'fill-current' : ''} strokeWidth={1.5} />
           </button>
         )}
         {/* Delete button overlay - Minimalist */}
