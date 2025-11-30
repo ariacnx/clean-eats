@@ -30,13 +30,17 @@ exports.generateRecipeImage = functions
     const spaceId = context.params.spaceId;
     const recipeId = context.params.recipeId;
 
+    console.log(`Recipe ${recipeId} - imagePrompt: ${imagePrompt ? 'exists' : 'missing'}, img: ${img ? img.substring(0, 50) + '...' : 'missing'}`);
+
     // Only act if we have a prompt and no image yet (or image is a placeholder)
     if (!imagePrompt) {
+      console.log(`Recipe ${recipeId} has no imagePrompt. Skipping image generation.`);
       return;
     }
 
     // Skip if image already exists and is not a placeholder
     if (img && !img.includes("placehold.co")) {
+      console.log(`Recipe ${recipeId} already has a non-placeholder image. Skipping image generation.`);
       return;
     }
 

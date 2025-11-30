@@ -217,9 +217,21 @@ export default function CleanPlateCasino() {
         (async () => {
           try {
             const space = await getSpace(db, spaceIdToUse);
-            if (space && space.name) {
-              setSpaceName(space.name);
-            } else {
+            if (space) {
+              if (space.name) {
+                setSpaceName(space.name);
+              } else {
+                // Space exists but has no name - use spaceId as fallback and update
+                const fallbackName = spaceIdToUse.toUpperCase();
+                setSpaceName(fallbackName);
+                // Update the space document with the fallback name
+                try {
+                  await updateSpaceName(db, spaceIdToUse, fallbackName);
+                } catch (updateError) {
+                  console.error('Error updating space with default name on initial load:', updateError);
+                }
+          }
+        } else {
               setSpaceName('');
             }
           } catch (e) {
@@ -276,12 +288,30 @@ export default function CleanPlateCasino() {
 
     // Set up real-time listener for space data (including name)
     const unsubscribe = subscribeToSpace(db, spaceId, (space) => {
-      console.log('Space subscription update:', space);
-      if (space && space.name) {
-        console.log('Setting space name to:', space.name);
-        setSpaceName(space.name);
+      if (space) {
+        if (space.name && space.name.trim()) {
+          setSpaceName(space.name);
+        } else {
+          // Space exists but has no name - set a default or try to update it
+          // Only set fallback if current spaceName is empty (don't overwrite if user just updated)
+          setSpaceName(prevName => {
+            if (!prevName || prevName === '' || prevName === 'Unnamed Space') {
+              const fallbackName = spaceId ? spaceId.toUpperCase() : 'MY-SPACE';
+              
+              // Try to update the space document with the fallback name (async, don't wait)
+              if (db && spaceId) {
+                updateSpaceName(db, spaceId, fallbackName).catch(e => {
+                  console.error('Error updating space with default name:', e);
+                });
+              }
+              
+              return fallbackName;
+            }
+            // Keep existing name if it was just set
+            return prevName;
+          });
+        }
       } else {
-        console.log('Space has no name, setting to empty');
         setSpaceName('');
       }
     });
@@ -804,10 +834,6 @@ export default function CleanPlateCasino() {
       // Generate prompt for Gemini image generation
       imagePrompt = getDishImagePrompt(formattedDishName);
     }
-
-    // Debug: Log the newDish state before creating dish object
-    console.log('newDish state before saving:', newDish);
-    console.log('newDish.cuisine value:', newDish.cuisine);
     
     const dish = {
       name: formattedDishName,
@@ -826,9 +852,6 @@ export default function CleanPlateCasino() {
     };
     
     // Debug: Log the dish being saved to verify cuisine is correct
-    console.log('Saving dish with cuisine:', dish.cuisine, 'for dish:', dish.name);
-    console.log('Full dish object:', dish);
-
     let saveSuccessful = false;
 
     // If editing, update existing recipe
@@ -1695,15 +1718,38 @@ export default function CleanPlateCasino() {
           </div>
 
           {/* Filters - Minimalist */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-3 md:grid-cols-4 gap-4">
              <div>
               <select 
                 value={lockCuisine === "All" ? "" : lockCuisine} 
                 onChange={(e) => setLockCuisine(e.target.value || "All")}
                 className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
               >
-                <option value="" disabled>Cuisines</option>
+                <option value="" disabled>Cuisine</option>
                 {CUISINES.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <select 
+                value={lockHealthTag === "All" ? "" : lockHealthTag} 
+                onChange={(e) => setLockHealthTag(e.target.value || "All")}
+                className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
+              >
+                <option value="" disabled>Healthiness</option>
+                {HEALTH_TAGS.filter(tag => tag !== 'All').map(tag => <option key={tag} value={tag}>{tag}</option>)}
+              </select>
+            </div>
+            
+            {/* Custom/Freeform tag filter - visible on mobile and desktop */}
+            <div>
+              <select 
+                value={lockFreeformTag === "All" ? "" : lockFreeformTag} 
+                onChange={(e) => setLockFreeformTag(e.target.value || "All")}
+                className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
+              >
+                <option value="" disabled>Custom</option>
+                {allFreeformTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
               </select>
             </div>
             
@@ -1714,31 +1760,8 @@ export default function CleanPlateCasino() {
                 onChange={(e) => setLockProtein(e.target.value || "All")}
                 className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
               >
-                <option value="" disabled>Proteins</option>
+                <option value="" disabled>Protein</option>
                 {PROTEINS.filter(p => p !== 'All').map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-
-            <div>
-              <select 
-                value={lockHealthTag === "All" ? "" : lockHealthTag} 
-                onChange={(e) => setLockHealthTag(e.target.value || "All")}
-                className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
-              >
-                <option value="" disabled>Health Levels</option>
-                {HEALTH_TAGS.filter(tag => tag !== 'All').map(tag => <option key={tag} value={tag}>{tag}</option>)}
-              </select>
-            </div>
-            
-            {/* Freeform tag filter - hidden on mobile, visible on desktop */}
-            <div className="hidden md:block">
-              <select 
-                value={lockFreeformTag === "All" ? "" : lockFreeformTag} 
-                onChange={(e) => setLockFreeformTag(e.target.value || "All")}
-                className="w-full bg-transparent border-b border-stone-300 focus:border-stone-900 text-sm font-light text-stone-700 py-2 appearance-none cursor-pointer focus:outline-none"
-              >
-                <option value="" disabled>Others</option>
-                {allFreeformTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
               </select>
             </div>
           </div>
@@ -1930,7 +1953,22 @@ export default function CleanPlateCasino() {
       }
 
       await updateSpaceName(db, spaceId, displayName);
+      
+      // Update local state immediately (subscription will also pick it up, but this ensures UI updates right away)
       setSpaceName(displayName);
+      
+      // Verify the update by checking the space document
+      try {
+        const updatedSpace = await getSpace(db, spaceId);
+        if (updatedSpace && updatedSpace.name) {
+          // Ensure local state matches what's in Firestore
+          if (updatedSpace.name !== displayName) {
+            setSpaceName(updatedSpace.name);
+          }
+        }
+      } catch (verifyError) {
+        console.error('Error verifying space update:', verifyError);
+      }
     } catch (e) {
       console.error("Error updating space name:", e);
       alert('Failed to update space name. Please try again.');
@@ -1960,8 +1998,20 @@ export default function CleanPlateCasino() {
         setSpaceId(spaceIdToJoin);
         try {
           const space = await getSpace(db, spaceIdToJoin);
-          if (space && space.name) {
-            setSpaceName(space.name);
+          if (space) {
+            if (space.name) {
+              setSpaceName(space.name);
+            } else {
+              // Space exists but has no name - use spaceId as fallback and update
+              const fallbackName = spaceIdToJoin.toUpperCase();
+              setSpaceName(fallbackName);
+              // Update the space document with the fallback name
+              try {
+                await updateSpaceName(db, spaceIdToJoin, fallbackName);
+              } catch (updateError) {
+                console.error('Error updating space with default name:', updateError);
+              }
+            }
           } else {
             setSpaceName('');
           }

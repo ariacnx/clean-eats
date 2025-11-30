@@ -30,6 +30,16 @@ export const MenuJoinModal = ({
     }
   }, [isOpen, currentSpaceId]);
 
+  // Exit edit mode when space name updates (after save)
+  useEffect(() => {
+    if (isEditingSpaceName && currentSpaceName && currentSpaceName.trim()) {
+      // If we're editing and the space name has been updated, exit edit mode
+      // This ensures the UI shows the updated name
+      setIsEditingSpaceName(false);
+      setEditingSpaceName('');
+    }
+  }, [currentSpaceName, isEditingSpaceName]);
+
   if (!isOpen) return null;
 
   const getShareableLink = () => {
@@ -90,12 +100,19 @@ export const MenuJoinModal = ({
     setIsEditingSpaceName(true);
   };
 
-  const handleSaveSpaceName = () => {
+  const handleSaveSpaceName = async () => {
     if (onUpdateSpaceName && editingSpaceName.trim()) {
-      onUpdateSpaceName(editingSpaceName.trim());
+      await onUpdateSpaceName(editingSpaceName.trim());
+      // Wait a moment for the state to update before exiting edit mode
+      // This ensures the display shows the updated value
+      setTimeout(() => {
+        setIsEditingSpaceName(false);
+        setEditingSpaceName('');
+      }, 100);
+    } else {
+      setIsEditingSpaceName(false);
+      setEditingSpaceName('');
     }
-    setIsEditingSpaceName(false);
-    setEditingSpaceName('');
   };
 
   const handleCancelEditSpaceName = () => {
@@ -156,8 +173,8 @@ export const MenuJoinModal = ({
                 </div>
               ) : (
                 <div className="flex items-center justify-center gap-2 mb-4">
-                  <p className="text-sm text-stone-900 tracking-wide">
-                    {currentSpaceName || 'Unnamed Space'}
+                  <p className="text-sm text-stone-900 tracking-wide" key={currentSpaceName}>
+                    {currentSpaceName && currentSpaceName.trim() ? currentSpaceName : 'Edit Space Name'}
                   </p>
                   {onUpdateSpaceName && (
                     <button
