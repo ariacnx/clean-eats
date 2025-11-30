@@ -2,3 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Ensure app fits phone width - prevent horizontal overflow */
+html, body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Ensure all containers respect viewport width */
+* {
+  box-sizing: border-box;
+}
+
+/* Prevent any element from causing horizontal scroll */
+img, video, iframe {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Add extra top padding for sticky headers on mobile */
+@media (max-width: 768px) {
+  .sticky-header {
+    padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+  }
+}
+

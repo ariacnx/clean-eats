@@ -1339,7 +1339,7 @@ export default function CleanPlateCasino() {
 
     return (
       <div className="min-h-screen bg-white pb-32">
-        <div className="bg-white p-8 sticky top-0 z-10 border-b border-stone-200">
+        <div className="bg-white p-8 sticky top-0 z-10 border-b border-stone-200" style={{ paddingTop: `calc(1.5rem + env(safe-area-inset-top, 44px))`, paddingBottom: '2rem' }}>
           <div className="text-center">
             <div className="flex items-center justify-center gap-4 mb-2">
               <h2 className="text-3xl font-light text-stone-900 tracking-wider uppercase">
@@ -1701,7 +1701,7 @@ export default function CleanPlateCasino() {
       <div className="min-h-screen bg-white pb-32">
         <div className={`bg-white p-8 sticky top-0 z-10 border-b border-stone-200 transition-transform duration-300 ${
           showFilters ? 'translate-y-0' : '-translate-y-full'
-        }`}>
+        }`} style={{ paddingTop: `calc(1.5rem + env(safe-area-inset-top, 44px))`, paddingBottom: '2rem' }}>
           <div className="flex items-center justify-between mb-4 md:mb-8">
             <div>
               <div className="flex items-center gap-4 mb-2">
@@ -2131,7 +2131,7 @@ export default function CleanPlateCasino() {
       <div className="min-h-screen bg-white flex flex-col font-sans text-stone-900 pb-32">
       
       {/* Top Bar */}
-      <div className="px-8 pt-8 pb-4">
+      <div className="px-8 pb-4" style={{ paddingTop: `calc(1.5rem + env(safe-area-inset-top, 44px))` }}>
         <div className="text-center">
           <div className="flex items-center justify-center gap-4">
             <h1 className="text-3xl font-light text-stone-900 tracking-wider uppercase">Clean Eats</h1>
